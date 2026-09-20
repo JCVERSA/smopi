@@ -1,0 +1,8 @@
+{
+  "name": "File Share",
+  "description": "A lightweight, secure, temporary file-sharing server with custom 3D animations and live statistics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

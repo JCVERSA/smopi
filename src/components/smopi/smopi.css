@@ -1,0 +1,154 @@
+/**
+ * Smopi — visual identity + animation origins.
+ *
+ * All colour is expressed through CSS custom properties so the avatar inherits
+ * the surrounding theme (`.dark` on any ancestor) and stays overridable per
+ * instance via `data-theme`. Only transform / opacity are animated anywhere in
+ * this component.
+ */
+
+.smopi {
+  /* shell: blue → indigo → violet */
+  --smopi-shell-1: #a3b8ff;
+  --smopi-shell-2: #6f7cff;
+  --smopi-shell-3: #7b4cf6;
+  --smopi-face-1: #101a33;
+  --smopi-face-2: #050915;
+  --smopi-eye-1: #ffffff;
+  --smopi-eye-2: #dfe9ff;
+  --smopi-rim-a: rgba(255, 255, 255, 0.9);
+  --smopi-rim-b: rgba(255, 255, 255, 0.05);
+  --smopi-sheen-a: rgba(255, 255, 255, 0.55);
+  --smopi-sheen-b: rgba(255, 255, 255, 0);
+  --smopi-aura-a: rgba(122, 138, 255, 0.42);
+  --smopi-aura-b: rgba(140, 120, 255, 0.16);
+  --smopi-aura-c: rgba(120, 130, 255, 0);
+  --smopi-halo: rgba(126, 132, 255, 0.55);
+  --smopi-ring: rgba(126, 138, 255, 0.55);
+  --smopi-ball-1: #ffffff;
+  --smopi-ball-2: #a9bcff;
+  --smopi-shadow: rgba(58, 66, 148, 0.3);
+  --smopi-caption: #6a7699;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.smopi__svg {
+  display: block;
+  overflow: visible;
+}
+
+/* ── dark mode: brighter shell, deeper face, a touch more bloom ───────────── */
+:where(.dark, .dark *) .smopi {
+  --smopi-shell-1: #8fa6ff;
+  --smopi-shell-2: #6170ff;
+  --smopi-shell-3: #8d4ff8;
+  --smopi-face-1: #070c1c;
+  --smopi-face-2: #01030b;
+  --smopi-rim-a: rgba(214, 226, 255, 0.85);
+  --smopi-sheen-a: rgba(255, 255, 255, 0.6);
+  --smopi-aura-a: rgba(126, 138, 255, 0.5);
+  --smopi-aura-b: rgba(150, 110, 255, 0.22);
+  --smopi-halo: rgba(134, 130, 255, 0.62);
+  --smopi-ring: rgba(140, 148, 255, 0.6);
+  --smopi-shadow: rgba(90, 90, 220, 0.42);
+  --smopi-caption: #8f9ac4;
+}
+
+/* ── status accents (kept restrained) ────────────────────────────────────── */
+.smopi[data-status="success"] {
+  --smopi-aura-a: rgba(96, 214, 190, 0.36);
+  --smopi-aura-b: rgba(120, 190, 255, 0.14);
+  --smopi-halo: rgba(104, 224, 194, 0.5);
+  --smopi-ring: rgba(108, 226, 196, 0.55);
+}
+
+.smopi[data-status="error"] {
+  --smopi-aura-a: rgba(255, 148, 148, 0.32);
+  --smopi-aura-b: rgba(255, 170, 130, 0.12);
+  --smopi-halo: rgba(255, 140, 140, 0.44);
+  --smopi-ring: rgba(255, 152, 152, 0.5);
+}
+
+/* explicit overrides win over the inherited theme */
+.smopi[data-theme="dark"] {
+  --smopi-shell-1: #8fa6ff;
+  --smopi-shell-2: #6170ff;
+  --smopi-shell-3: #8d4ff8;
+  --smopi-face-1: #070c1c;
+  --smopi-face-2: #01030b;
+  --smopi-rim-a: rgba(214, 226, 255, 0.85);
+  --smopi-aura-a: rgba(126, 138, 255, 0.5);
+  --smopi-aura-b: rgba(150, 110, 255, 0.22);
+  --smopi-halo: rgba(134, 130, 255, 0.62);
+  --smopi-ring: rgba(140, 148, 255, 0.6);
+  --smopi-shadow: rgba(90, 90, 220, 0.42);
+  --smopi-caption: #8f9ac4;
+}
+
+.smopi[data-theme="light"] {
+  --smopi-shell-1: #a3b8ff;
+  --smopi-shell-2: #6f7cff;
+  --smopi-shell-3: #7b4cf6;
+  --smopi-face-1: #101a33;
+  --smopi-face-2: #050915;
+  --smopi-rim-a: rgba(255, 255, 255, 0.9);
+  --smopi-aura-a: rgba(122, 138, 255, 0.42);
+  --smopi-aura-b: rgba(140, 120, 255, 0.16);
+  --smopi-halo: rgba(126, 132, 255, 0.55);
+  --smopi-ring: rgba(126, 138, 255, 0.55);
+  --smopi-shadow: rgba(58, 66, 148, 0.3);
+  --smopi-caption: #6a7699;
+}
+
+/* ── transform origins (transform-box keeps this reliable across browsers) ── */
+.smopi__rig {
+  transform-box: view-box;
+  transform-origin: 60px 70px;
+  will-change: transform;
+}
+
+.smopi__antenna {
+  /* the group's own bounding-box bottom-centre is the antenna's hinge */
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  will-change: transform;
+}
+
+.smopi__face,
+.smopi__eye,
+.smopi__ball,
+.smopi__aura,
+.smopi__halo,
+.smopi__sheen,
+.smopi__ring {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+}
+
+.smopi__face,
+.smopi__eye {
+  will-change: transform;
+}
+
+.smopi__caption {
+  margin-top: 0.55em;
+  font-size: 11px;
+  font-weight: 550;
+  letter-spacing: 0.005em;
+  color: var(--smopi-caption);
+  font-family: var(--font-sans, ui-sans-serif, system-ui, sans-serif);
+  white-space: nowrap;
+  transition: color 0.4s ease;
+}
+
+/* Small sizes: keep the caption from fighting the mark. */
+.smopi[data-size="xs"] .smopi__caption,
+.smopi[data-size="sm"] .smopi__caption {
+  font-size: 9.5px;
+}
