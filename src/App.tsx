@@ -750,7 +750,11 @@ export default function App() {
     xhrRef.current = xhr;
 
     const token = authToken || (typeof window !== 'undefined' ? sessionStorage.getItem('fs_token') : null);
-    xhr.open('GET', getDownloadUrl(name), true);
+    // XHR can set headers, so authenticate via Authorization only and keep the
+    // token out of the URL (query strings leak into history and proxy logs).
+    // The ?token= form is still used for plain <a href> downloads below, where
+    // a browser navigation cannot carry a header.
+    xhr.open('GET', `/download/${encodeURIComponent(name)}`, true);
     if (token) {
       xhr.setRequestHeader('Authorization', `Bearer ${token}`);
     }

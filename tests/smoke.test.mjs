@@ -425,3 +425,49 @@ describe('restart preserves credentials (regression: operator lockout)', () => {
     assert.equal(relogin.status, 200);
   });
 });
+
+describe('download auth channels', () => {
+  let server;
+  let token;
+
+  before(async () => {
+    server = await startServer();
+    const res = await fetch(`${server.baseUrl}/api/login`, {
+      method: 'POST',
+      headers: json,
+      body: JSON.stringify({ password: server.password })
+    });
+    token = (await res.json()).token;
+
+    const { body, headers } = multipart('auth-probe.txt', 'probe\n');
+    await fetch(`${server.baseUrl}/api/upload`, {
+      method: 'POST',
+      headers: { ...headers, authorization: `Bearer ${token}` },
+      body
+    });
+  });
+
+  after(async () => {
+    await server?.stop();
+  });
+
+  it('authorizes a download via the Authorization header alone (no ?token=)', async () => {
+    const res = await fetch(`${server.baseUrl}/download/auth-probe.txt`, {
+      headers: { authorization: `Bearer ${token}` }
+    });
+    assert.equal(res.status, 200);
+    assert.equal(await res.text(), 'probe\n');
+  });
+
+  it('still accepts ?token= for plain <a href> navigations (iframe fallback)', async () => {
+    const res = await fetch(
+      `${server.baseUrl}/download/auth-probe.txt?token=${encodeURIComponent(token)}`
+    );
+    assert.equal(res.status, 200);
+  });
+
+  it('rejects a bogus ?token=', async () => {
+    const res = await fetch(`${server.baseUrl}/download/auth-probe.txt?token=deadbeef`);
+    assert.equal(res.status, 401);
+  });
+});
