@@ -296,3 +296,97 @@ Lint:          NOT RUN (no linter configured; "lint" == tsc only)
 Type Check:    PASS  (npx tsc --noEmit, exit 0)
 Security Scan: PASS  (npm audit: 0 known vulnerabilities)
 ```
+
+---
+
+# Addendum — Remediation round 2 (branch `arena/01a0bf28-smopi`, 2026-09-20)
+
+Re-audit of base commit `8905440`. **Most findings from the original report were
+already fixed in the codebase** and were re-verified rather than trusted:
+CRITICAL-1, CRITICAL-2, HIGH-1, HIGH-2, MED-2, MED-3, MED-4, MED-5 and MED-6 all
+now pass direct runtime checks. Remaining and newly-found work was completed in
+five commits.
+
+## New finding (not in the original report)
+
+```text
+Severity:   CRITICAL (tooling/type-safety blocker)
+Confidence: CONFIRMED (reproduced)
+Category:   Build / type safety
+Location:   src/types.ts (absent) + 9 importers
+
+Problem:
+src/types.ts was never committed. `npm run lint` (tsc --noEmit) failed with
+9 x TS2307.
+
+Evidence:
+`git ls-files | grep types` returned only src/components/smopi/types.ts;
+the file is not .gitignore'd and absent from the HEAD tree.
+
+Impact:
+Vite/esbuild strip `import type` without resolving it, so `npm run build`
+stayed GREEN while the only type-safety gate was red. This is the same
+silent-drift mechanism that previously hid the archiver v7/v8 breakage.
+
+Root Cause:
+File omitted from the initial commit.
+
+Fix:
+Recreated from the actual server payloads. Doing so surfaced two real latent
+bugs in FilePreviewModal (undiscriminated union access on `.content`, and a
+client-only `type: 'error'` preview variant missing from the union).
+
+Regression Risk:
+Low — verified by tsc + 34 tests.
+```
+
+## Changes made
+
+| Commit | Scope |
+|---|---|
+| `d9026b5` | Restore `src/types.ts`; sanitize 6 error-leaking routes; `__dirname` → `import.meta.dirname`; ignore `shared_files/` |
+| `6ddefc4` | 31-test smoke suite (`node:test`, no new deps) + 3 stale README corrections |
+| `d46a003` | GitHub Actions CI (lint + test + audit) |
+| `0a2f170` | Remove 3 unused deps (`ogl`, `@hugeicons/*`) |
+| `ef7add4` | Vendor chunk splitting + lazy `DodgeField` |
+| `84030bd` | Drop redundant `?token=` from XHR downloads (+3 tests) |
+
+## Measured results
+
+- **Installed size:** 370 MB → 234 MB (−137 MB). Bundle unchanged — tree-shaking
+  already excluded the unused deps, so this is supply-chain surface only.
+- **Bundle chunking:** one 743.83 KB chunk → `react` 210.61 / `index` 321.50 /
+  `markdown` 123.78 / `physics` 83.78 / `DodgeField` 4.49 (lazy). Initial
+  transfer is roughly unchanged; the benefit is cache reuse across deploys.
+  Size attribution came from the build sourcemap, not intuition.
+- **Tests:** 0 → 34, verified non-vacuous by fault injection (reintroducing the
+  error leak fails 1 test; removing `safeChild`'s guards fails 3).
+
+## Still open
+
+- **MED-1 (partial):** `?token=` remains on `<a href>` download links in
+  `FileItem`/`FilePreviewModal`. A browser navigation cannot send an
+  `Authorization` header and cookies may be withheld in the cross-origin AI
+  Studio iframe, so the fallback is **LIKELY load-bearing**. Removing it needs
+  verification inside that iframe, which is not possible from this environment.
+- **MED-7 (racy upload collision):** unchanged; the `fs.existsSync` loop in the
+  multer `filename` callback is still TOCTOU-prone under concurrent uploads of
+  the same name.
+- **LOW-2/3/4/5:** deprecated `X-XSS-Protection` header, 48-bit generated
+  password, `trust proxy 1` limiter caveat, session TTL vs share expiry.
+- **UNVERIFIED:** Gemini live behavior (no API key available); production
+  deployment topology.
+
+## Validation evidence (round 2, from a clean `node_modules`)
+
+```text
+Build:         PASS  (vite + esbuild, exit 0; no __dirname warning, no >500 KB warning)
+Prod Runtime:  PASS  (NODE_ENV=production node dist/server.cjs boots; all emitted chunks served 200)
+Type Check:    PASS  (npx tsc --noEmit, exit 0 — was FAIL with 9 errors)
+Tests:         PASS  (34/34, 13 suites, node --test)
+Lint:          NOT RUN (no ESLint configured; "lint" == tsc only)
+Security Scan: PASS  (npm audit --omit=dev: 0 vulnerabilities)
+Runtime E2E:   PASS  (login, upload, list, ZIP incl. EOCD, Range 206, RFC 5987
+                      filenames, traversal 404, cross-origin POST 403, owner gating,
+                      expiry, restart credential preservation, error hygiene)
+```
