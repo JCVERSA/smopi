@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import {
   FileText,
   FileCode,
@@ -37,7 +37,9 @@ import SlingButton from './SlingButton';
 import GlideSelect from './GlideSelect';
 import SquishSwitch from './SquishSwitch';
 import PeekRating from './PeekRating';
-import DodgeField from './DodgeField';
+// Lazy: the Orb Studio modal is closed by default (showOrbStudio = false), so
+// its physics/canvas code should not ship in the initial chunk.
+const DodgeField = lazy(() => import('./DodgeField'));
 
 interface SmopiWorkspaceViewProps {
   files: SharedFile[];
@@ -1118,12 +1120,14 @@ export const SmopiWorkspaceView: React.FC<SmopiWorkspaceViewProps> = ({
                 <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Playful Spark (DodgeField)</span>
                 <span style={{ fontSize: '0.75rem', color: '#a1a1aa' }}>Cursor physics element</span>
               </div>
-              <DodgeField
-                fieldHeight={100}
-                patience={3}
-                taunts={['Catch the Orb', 'Too fast', 'Almost!', 'Captured!']}
-                onCatch={() => setOrbState('composing')}
-              />
+              <Suspense fallback={<div style={{ height: 100 }} aria-busy="true" />}>
+                <DodgeField
+                  fieldHeight={100}
+                  patience={3}
+                  taunts={['Catch the Orb', 'Too fast', 'Almost!', 'Captured!']}
+                  onCatch={() => setOrbState('composing')}
+                />
+              </Suspense>
             </div>
           </div>
         </div>
