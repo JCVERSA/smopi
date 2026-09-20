@@ -35,8 +35,8 @@ export const LoginView: React.FC<LoginViewProps> = ({
     <div className="dd-gate">
       <div>
         <Spine ratio={ratio} infinite={infinite} critical={critical} />
-        <header className="dd-head">
-          <div className="dd-head__id">
+        <header className="dd-topbar">
+          <div className="dd-topbar__left">
             <span className="dd-mark">Dead Drop</span>
           </div>
           <span className="dd-count">

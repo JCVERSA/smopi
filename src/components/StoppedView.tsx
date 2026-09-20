@@ -47,8 +47,8 @@ export const StoppedView: React.FC<StoppedViewProps> = ({ status, onRestart }) =
       <div>
         {/* An empty spine: the share's life is spent. */}
         <Spine ratio={0} infinite={false} critical={false} />
-        <header className="dd-head">
-          <div className="dd-head__id">
+        <header className="dd-topbar">
+          <div className="dd-topbar__left">
             <span className="dd-mark">Dead Drop</span>
           </div>
           <span className="dd-count" style={{ color: 'var(--dd-signal)' }}>

@@ -8,7 +8,7 @@ dotenv.config();
 import { ZipArchive } from 'archiver';
 import multer from 'multer';
 import { createServer as createViteServer } from 'vite';
-import { runSmopiAgent, executeSmopiTool, sanitizeFileName, resolveSafePath } from './server/smopi';
+import { runSmopiAgent, runSmopiAgentStream, executeSmopiTool, sanitizeFileName, resolveSafePath } from './server/smopi';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -841,6 +841,64 @@ app.post('/api/smopi/chat', async (req, res) => {
   } catch (err: any) {
     console.error('Smopi chat route error:', err);
     res.status(500).json({ error: 'Smopi failed to process request' });
+  }
+});
+
+// API: Smopi streaming chat (Server-Sent Events)
+//
+// Mirrors the guards of POST /api/smopi/chat, but pushes incremental events so
+// the client can render the answer as it is produced. The buffered endpoint is
+// retained for API consumers and as a client fallback.
+app.post('/api/smopi/chat/stream', async (req, res) => {
+  if (!isSessionValid(req)) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  if (isExpired()) {
+    return res.status(403).json({ error: 'Share expired' });
+  }
+  if (!allowSmopi(req.ip || 'unknown')) {
+    res.setHeader('Retry-After', '60');
+    return res.status(429).json({ error: 'Too many AI requests. Please wait a minute.' });
+  }
+  const { message, history } = req.body;
+  if (!message || typeof message !== 'string') {
+    return res.status(400).json({ error: 'Message is required' });
+  }
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    // Prevents proxies (nginx in the documented deploy path) from buffering
+    // the stream, which would defeat the purpose entirely.
+    'X-Accel-Buffering': 'no',
+  });
+  res.flushHeaders?.();
+
+  let clientGone = false;
+  req.on('close', () => {
+    clientGone = true;
+  });
+
+  const send = (event: unknown) => {
+    if (clientGone || res.writableEnded) return;
+    res.write(`data: ${JSON.stringify(event)}\n\n`);
+  };
+
+  // Keep intermediaries from timing out during long tool rounds.
+  const heartbeat = setInterval(() => {
+    if (clientGone || res.writableEnded) return;
+    res.write(': ping\n\n');
+  }, 15000);
+
+  try {
+    await runSmopiAgentStream(message, SHARE_DIR, history || [], send);
+  } catch (err: any) {
+    console.error('Smopi stream route error:', err);
+    send({ type: 'error', error: 'Smopi failed to process request' });
+  } finally {
+    clearInterval(heartbeat);
+    if (!res.writableEnded) res.end();
   }
 });
 

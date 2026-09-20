@@ -1,34 +1,25 @@
-import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { AnimatePresence, LayoutGroup, motion, useReducedMotion } from 'motion/react';
 import {
-  Trash2,
-  Download,
-  Edit3,
-  RotateCcw,
   Check,
-  Copy,
-  Eye,
-  Search,
-  Power,
-  Upload,
   KeyRound,
-  Sliders
+  PanelLeftOpen,
+  Power,
+  RotateCcw,
+  Sliders,
+  LayoutGrid,
+  MessageSquare
 } from 'lucide-react';
-import Markdown from 'react-markdown';
-import { ThinkingOrb } from 'thinking-orbs';
-import type { SharedFile, ShareStatus, SmopiAction, SmopiMessage } from '../types';
-import { SmopiAvatar, type SmopiStatus } from './smopi';
-import ThoughtLine, { type OrbState } from './ThoughtLine';
-import FolderFloat from './FolderFloat';
-import PromptBar from './PromptBar';
-import SlingButton from './SlingButton';
-import GlideSelect from './GlideSelect';
-import SquishSwitch from './SquishSwitch';
-import PeekRating from './PeekRating';
+import type { SharedFile, ShareStatus } from '../types';
+import type { OrbState } from './ThoughtLine';
+import { Orb } from './deaddrop/Orb';
 import { Spine } from './deaddrop/Spine';
 import { useCountdown, formatClock } from './deaddrop/useCountdown';
-// Lazy: the Orb Studio modal is closed by default (showOrbStudio = false), so
-// its physics/canvas code should not ship in the initial chunk.
-const DodgeField = lazy(() => import('./DodgeField'));
+import { useSmopiChat, type ChatPhase } from './deaddrop/useSmopiChat';
+import { FilesSidebar } from './deaddrop/FilesSidebar';
+import { MessageList } from './deaddrop/MessageList';
+import { Composer } from './deaddrop/Composer';
+import { OrbStudio } from './deaddrop/OrbStudio';
 
 interface SmopiWorkspaceViewProps {
   files: SharedFile[];
@@ -46,36 +37,39 @@ interface SmopiWorkspaceViewProps {
   renderFilesGallery?: React.ReactNode;
 }
 
-/** Verb shown in the action ledger under an agent turn. */
-const ACTION_VERB: Record<string, string> = {
-  created: 'created',
-  modified: 'modified',
-  renamed: 'renamed',
-  deleted: 'deleted',
-  duplicated: 'duplicated',
-  indexed: 'indexed',
-  analyzed: 'analyzed'
-};
+const WELCOME_TEXT =
+  "I can create, organise, rename, summarise and delete the files in this drop. Tell me what you need.";
 
-function totalSize(files: SharedFile[]): string {
-  const n = files.reduce((acc, f) => acc + (f.size || 0), 0);
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+/** Maps the message text to one of the orb's nine hand-tuned states. */
+function orbStateFor(query: string): OrbState {
+  const q = query.toLowerCase();
+  if (/(search|find|look|scan)/.test(q)) return 'searching';
+  if (/(create|write|compose|markdown|draft)/.test(q)) return 'composing';
+  if (/(organi[sz]e|rename|clean|sort)/.test(q)) return 'weaving';
+  if (/(fix|solve|delete|remove|audit)/.test(q)) return 'solving';
+  if (/(connect|sync|share)/.test(q)) return 'connecting';
+  if (/(shape|format|transform)/.test(q)) return 'shaping';
+  return 'working';
 }
 
+const SUGGESTIONS = [
+  { label: 'Summarise this drop', prompt: 'Summarise everything in this workspace.' },
+  { label: 'Create an index', prompt: 'Generate an index.md table of contents for all files.' },
+  { label: 'Tidy the filenames', prompt: 'Organize and rename files cleanly and consistently.' },
+  { label: 'Find duplicates', prompt: 'Find duplicate or redundant files in this workspace.' }
+];
+
 /**
- * "Dead Drop" workspace.
+ * Smopi workspace — a chat-first layout in the ChatGPT idiom.
  *
- * The design is grounded in the product's defining fact: this share is
- * temporary and will disappear. That fact is the hero, rendered as the
- * depletion spine across the top of the viewport. Everything else is
- * deliberately quiet so the one bold element carries the personality:
+ * Structure: a collapsible files sidebar on the left, the conversation
+ * centred in a comfortable reading column, and a floating composer pinned to
+ * the bottom. The orb avatar is the anchor: it opens large and centred on the
+ * empty state, then performs a shared-layout transition into the header the
+ * moment the first message is sent, freeing the centre for the transcript.
  *
- *  - files are a dense hairline-ruled manifest, not a card grid;
- *  - the transcript has no bubbles — speaker is encoded in type and a rule,
- *    which avoids nesting cards inside cards;
- *  - a single accent (signal orange) is reserved for expiry and destruction.
+ * Text streams token-by-token from `/api/smopi/chat/stream` (SSE), with an
+ * automatic fallback to the buffered endpoint.
  */
 export const SmopiWorkspaceView: React.FC<SmopiWorkspaceViewProps> = ({
   files,
@@ -92,700 +86,317 @@ export const SmopiWorkspaceView: React.FC<SmopiWorkspaceViewProps> = ({
   selectedFiles = [],
   renderFilesGallery
 }) => {
-  const [messages, setMessages] = useState<SmopiMessage[]>(() => [
-    {
-      id: 'welcome',
-      role: 'model',
-      text:
-        "I'm Smopi. I can **create**, **organise**, **modify**, **rename**, **summarise** and **delete** the files in this drop.\n\nTell me what you need.",
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      model: 'Smopi Agent'
-    }
-  ]);
+  const reduceMotion = useReducedMotion();
 
-  const [inputPrompt, setInputPrompt] = useState('');
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [avatarStatus, setAvatarStatus] = useState<SmopiStatus>('idle');
+  const [input, setInput] = useState('');
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [orbState, setOrbState] = useState<OrbState>('breathing');
+  const [orbSpeed, setOrbSpeed] = useState(1);
+  const [showStudio, setShowStudio] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copiedPassword, setCopiedPassword] = useState(false);
-  const [fileSearch, setFileSearch] = useState('');
-  const [viewMode, setViewMode] = useState<'chat' | 'files'>('chat');
+  const [tab, setTab] = useState<'chat' | 'gallery'>('chat');
 
-  // Thinking Orb & interaction component state
-  const [orbState, setOrbState] = useState<OrbState>('searching');
-  const [orbDark, setOrbDark] = useState<boolean>(true);
-  const [orbSpeed, setOrbSpeed] = useState<number>(1);
-  const [usePromptBar, setUsePromptBar] = useState<boolean>(true);
-  const [showOrbStudio, setShowOrbStudio] = useState<boolean>(false);
-  const [ratings, setRatings] = useState<Record<string, number>>({});
-
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  // The hero: a smooth local countdown seeded from the server's poll.
   const { left, infinite, ratio, critical } = useCountdown(status?.remaining);
 
-  useEffect(() => {
-    if (viewMode === 'chat') {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [messages, isProcessing, viewMode]);
+  const handlePhase = useCallback((phase: ChatPhase) => {
+    if (phase === 'idle') setOrbState('breathing');
+  }, []);
 
-  const handleCopyPassword = () => {
-    if (status?.share_password) {
-      navigator.clipboard.writeText(status.share_password);
-      setCopiedPassword(true);
-      setTimeout(() => setCopiedPassword(false), 2000);
-    }
-  };
+  const { messages, phase, toolDetail, isProcessing, send, stop, reset } = useSmopiChat({
+    authToken,
+    onFilesChanged,
+    onPhase: handlePhase,
+    welcomeText: WELCOME_TEXT
+  });
 
-  const handleCopyMessage = (id: string, text: string) => {
+  // The hero state is the untouched conversation: welcome message only.
+  const isHero = messages.length === 1 && messages[0].id.startsWith('welcome');
+
+  const submit = useCallback(
+    (text?: string) => {
+      const q = (text ?? input).trim();
+      if (!q || isProcessing) return;
+      setOrbState(orbStateFor(q));
+      setInput('');
+      void send(q);
+    },
+    [input, isProcessing, send]
+  );
+
+  const handleCopy = useCallback((id: string, text: string) => {
     navigator.clipboard.writeText(text);
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 1800);
-  };
+  }, []);
 
-  const handleSendMessage = async (textToSend?: string) => {
-    const query = (textToSend || inputPrompt).trim();
-    if (!query || isProcessing) return;
+  const copyPassword = useCallback(() => {
+    if (!status?.share_password) return;
+    navigator.clipboard.writeText(status.share_password);
+    setCopiedPassword(true);
+    setTimeout(() => setCopiedPassword(false), 2000);
+  }, [status?.share_password]);
 
-    if (viewMode !== 'chat') {
-      setViewMode('chat');
-    }
-
-    const userMsg: SmopiMessage = {
-      id: `user-${Date.now()}`,
-      role: 'user',
-      text: query,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  // Cmd/Ctrl+B toggles the sidebar, as in the apps this layout echoes.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        setSidebarOpen((v) => !v);
+      }
     };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
-    setMessages((prev) => [...prev, userMsg]);
-    setInputPrompt('');
-    setIsProcessing(true);
-    setAvatarStatus('thinking');
-
-    // Contextually tune ThinkingOrb state across the 9 hand-tuned states
-    const lower = query.toLowerCase();
-    if (lower.includes('search') || lower.includes('find') || lower.includes('look') || lower.includes('scan')) {
-      setOrbState('searching');
-    } else if (lower.includes('create') || lower.includes('write') || lower.includes('compose') || lower.includes('markdown') || lower.includes('draft')) {
-      setOrbState('composing');
-    } else if (lower.includes('organize') || lower.includes('rename') || lower.includes('clean') || lower.includes('sort')) {
-      setOrbState('weaving');
-    } else if (lower.includes('fix') || lower.includes('solve') || lower.includes('delete') || lower.includes('remove') || lower.includes('audit')) {
-      setOrbState('solving');
-    } else if (lower.includes('connect') || lower.includes('sync') || lower.includes('share')) {
-      setOrbState('connecting');
-    } else if (lower.includes('shape') || lower.includes('format') || lower.includes('transform')) {
-      setOrbState('shaping');
-    } else {
-      setOrbState('working');
-    }
-
-    try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
-
-      const historyPayload = messages
-        .filter((m) => m.id !== 'welcome')
-        .slice(-6)
-        .map((m) => ({
-          role: m.role,
-          text: m.text
-        }));
-
-      const res = await fetch('/api/smopi/chat', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          message: query,
-          history: historyPayload
-        })
-      });
-
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.error || `Server error: ${res.status}`);
-      }
-
-      const data = await res.json();
-      const actions: SmopiAction[] = data.actionsTaken || [];
-
-      const modelMsg: SmopiMessage = {
-        id: `model-${Date.now()}`,
-        role: 'model',
-        text: data.text || 'Done.',
-        actions,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        model: data.model || 'Gemini 3.8 Flash'
-      };
-
-      setMessages((prev) => [...prev, modelMsg]);
-      setAvatarStatus('success');
-      setTimeout(() => setAvatarStatus('idle'), 2500);
-
-      if (actions.length > 0) {
-        onFilesChanged();
-      }
-    } catch (err: any) {
-      setAvatarStatus('error');
-      setTimeout(() => setAvatarStatus('idle'), 3000);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `error-${Date.now()}`,
-          role: 'model',
-          text: `That didn't work: ${err.message || 'the task could not be completed'}.`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        }
-      ]);
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSendMessage();
-    }
-  };
-
-  const handleResetChat = () => {
-    setMessages([
-      {
-        id: `welcome-${Date.now()}`,
-        role: 'model',
-        text: `Cleared. This drop currently holds **${files.length} ${files.length === 1 ? 'file' : 'files'}**. What next?`,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        model: 'Gemini 3.8 Flash'
-      }
-    ]);
-  };
-
-  const filteredFiles = files.filter((f) =>
-    f.name.toLowerCase().includes(fileSearch.toLowerCase())
+  const spring = useMemo(
+    () =>
+      reduceMotion
+        ? { duration: 0 }
+        : { type: 'spring' as const, stiffness: 260, damping: 30, mass: 0.9 },
+    [reduceMotion]
   );
 
-  const hasOnlyWelcome = messages.length === 1 && messages[0].id === 'welcome';
-
   return (
-    <div className="dd-root">
-      {/* ---- Hero: the depletion spine + header ------------------------- */}
-      <div>
-        <Spine ratio={ratio} infinite={infinite} critical={critical} />
+    <div className="dd-app">
+      <Spine ratio={ratio} infinite={infinite} critical={critical} />
 
-        <header className="dd-head">
-          <div className="dd-head__id">
-            <SmopiAvatar size={24} status={avatarStatus} />
-            <span className="dd-mark">Dead Drop</span>
-            <span aria-live="polite">
-              <span className="dd-clock" data-critical={critical ? 'true' : 'false'}>
-                {formatClock(left)}
-              </span>
-              <span className="dd-clock__unit">{infinite ? 'no expiry' : 'left'}</span>
-            </span>
-          </div>
-
-          <div className="dd-head__acts">
-            <GlideSelect
-              options={[
-                { label: 'Conversation', value: 'chat' },
-                { label: 'Gallery', value: 'files' }
-              ]}
-              value={viewMode}
-              onChange={(v) => setViewMode(v === 'files' ? 'files' : 'chat')}
-              size="sm"
-              ariaLabel="Switch workspace view"
-              accentColor="#c2603c"
-              surfaceColor="#131c20"
-              textColor="#e8edec"
-            />
-
-            {status?.share_password && (
-              <button type="button" className="dd-btn" onClick={handleCopyPassword} title="Copy the share password">
-                {copiedPassword ? <Check size={14} /> : <KeyRound size={14} />}
-                {copiedPassword ? 'Copied' : 'Password'}
-              </button>
-            )}
-
-            <button
-              type="button"
-              className="dd-btn dd-btn--icon"
-              onClick={() => setShowOrbStudio(true)}
-              title="Orb Studio"
-              aria-label="Open Orb Studio"
+      <div className="dd-app__body">
+        {/* ---------------- Sidebar ---------------- */}
+        <AnimatePresence initial={false}>
+          {sidebarOpen && (
+            <motion.aside
+              key="sidebar"
+              className="dd-side"
+              initial={{ width: 0, opacity: 0 }}
+              animate={{ width: 288, opacity: 1 }}
+              exit={{ width: 0, opacity: 0 }}
+              transition={reduceMotion ? { duration: 0 } : { duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+              aria-label="Files in this drop"
             >
-              <Sliders size={14} />
-            </button>
-
-            <button type="button" className="dd-btn dd-btn--icon" onClick={handleResetChat} title="Clear the conversation" aria-label="Clear conversation">
-              <RotateCcw size={14} />
-            </button>
-
-            {status?.is_owner && (
-              <button type="button" className="dd-btn dd-btn--danger" onClick={onStopShare} title="Stop this share">
-                <Power size={14} />
-                Stop
-              </button>
-            )}
-          </div>
-        </header>
-      </div>
-
-      {/* ---- Body: manifest + exchange ---------------------------------- */}
-      <div className="dd-body">
-        {/* Manifest: rows with hairlines, not a card grid. */}
-        <aside className="dd-manifest" aria-label="Files in this drop">
-          <div className="dd-manifest__head">
-            <h2 className="dd-title">Manifest</h2>
-            <span className="dd-count">
-              {files.length === 0
-                ? 'empty'
-                : `${files.length} ${files.length === 1 ? 'item' : 'items'} \u00b7 ${totalSize(files)}`}
-            </span>
-          </div>
-
-          {files.length > 6 && (
-            <div style={{ padding: '0 16px 8px' }}>
-              <div className="dd-composer__box" style={{ padding: '6px 10px' }}>
-                <Search size={13} color="#5f7370" />
-                <input
-                  className="dd-composer__input"
-                  style={{ fontSize: '0.8125rem' }}
-                  value={fileSearch}
-                  placeholder="Filter"
-                  aria-label="Filter files"
-                  onChange={(e) => setFileSearch(e.target.value)}
-                />
-              </div>
-            </div>
+              <FilesSidebar
+                files={files}
+                selectedFiles={selectedFiles}
+                onSelectFile={onSelectFile}
+                onPreviewFile={onPreviewFile}
+                onEditFile={onEditFile}
+                onDownloadFile={onDownloadFile}
+                onDeleteFile={onDeleteFile}
+                onUploadClick={onUploadClick}
+                onCollapse={() => setSidebarOpen(false)}
+              />
+            </motion.aside>
           )}
+        </AnimatePresence>
 
-          <div className="dd-manifest__list">
-            {filteredFiles.length === 0 && (
-              <p className="dd-empty">
-                {files.length === 0 ? (
-                  <>
-                    Nothing here yet.
-                    <br />
-                    Add a file to put it in the drop.
-                  </>
-                ) : (
-                  'No file matches that filter.'
+        {/* ---------------- Main ---------------- */}
+        <main className="dd-main">
+          <LayoutGroup>
+            <header className="dd-topbar">
+              <div className="dd-topbar__left">
+                {!sidebarOpen && (
+                  <button
+                    type="button"
+                    className="dd-btn dd-btn--ghost dd-btn--icon"
+                    onClick={() => setSidebarOpen(true)}
+                    title="Open sidebar"
+                    aria-label="Open sidebar"
+                  >
+                    <PanelLeftOpen size={16} />
+                  </button>
                 )}
-              </p>
-            )}
 
-            {filteredFiles.map((file) => (
-              <div
-                key={file.name}
-                className="dd-row"
-                data-selected={selectedFiles.includes(file.name) ? 'true' : 'false'}
-                role="button"
-                tabIndex={0}
-                onClick={(e) => onSelectFile?.(file.name, e)}
-                onDoubleClick={() => onPreviewFile(file)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') onPreviewFile(file);
-                }}
-                aria-label={`${file.name}, ${file.size_human}`}
-              >
-                <span className="dd-row__name" title={file.name}>
-                  {file.name}
+                {/* Docked avatar. Shares a layoutId with the hero orb, so the
+                    two positions are one continuous element. */}
+                {!isHero && (
+                  <motion.div layoutId="smopi-orb" transition={spring} className="dd-orb-dock">
+                    <Orb state={orbState} px={28} speed={orbSpeed} />
+                  </motion.div>
+                )}
+
+                <span className="dd-mark">Smopi</span>
+
+                <span className="dd-topbar__clock" aria-live="polite">
+                  <span className="dd-clock-sm" data-critical={critical ? 'true' : 'false'}>
+                    {formatClock(left)}
+                  </span>
+                  <span className="dd-clock__unit">{infinite ? 'no expiry' : 'left'}</span>
                 </span>
-                <span className="dd-row__acts">
-                  <button
-                    type="button"
-                    className="dd-btn dd-btn--ghost dd-btn--icon"
-                    title="Preview"
-                    aria-label={`Preview ${file.name}`}
-                    onClick={(e) => { e.stopPropagation(); onPreviewFile(file); }}
-                  >
-                    <Eye size={14} />
-                  </button>
-                  <button
-                    type="button"
-                    className="dd-btn dd-btn--ghost dd-btn--icon"
-                    title="Edit"
-                    aria-label={`Edit ${file.name}`}
-                    onClick={(e) => { e.stopPropagation(); onEditFile(file); }}
-                  >
-                    <Edit3 size={14} />
-                  </button>
-                  <button
-                    type="button"
-                    className="dd-btn dd-btn--ghost dd-btn--icon"
-                    title="Download"
-                    aria-label={`Download ${file.name}`}
-                    onClick={(e) => { e.stopPropagation(); onDownloadFile(file); }}
-                  >
-                    <Download size={14} />
-                  </button>
-                  <button
-                    type="button"
-                    className="dd-btn dd-btn--ghost dd-btn--icon"
-                    title="Delete"
-                    aria-label={`Delete ${file.name}`}
-                    onClick={(e) => { e.stopPropagation(); onDeleteFile(file.name); }}
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </span>
-                <span className="dd-row__meta">{file.size_human}</span>
               </div>
-            ))}
-          </div>
 
-          <div className="dd-manifest__foot">
-            <div
-              className="dd-drop"
-              role="button"
-              tabIndex={0}
-              onClick={onUploadClick}
-              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onUploadClick(); }}
-            >
-              <Upload size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />
-              Add files to the drop
-            </div>
-          </div>
-        </aside>
-
-        {/* Exchange: transcript with no bubbles. */}
-        <section className="dd-exchange" aria-label="Smopi conversation">
-          <div className="dd-exchange__head">
-            <h2 className="dd-title">{viewMode === 'chat' ? 'Smopi' : 'Gallery'}</h2>
-            {isProcessing && (
-              <span className="dd-count" aria-live="polite">
-                <ThinkingOrb state={orbState} size={20} theme={orbDark ? 'dark' : 'light'} speed={orbSpeed} />
-              </span>
-            )}
-          </div>
-
-          {viewMode === 'files' ? (
-            <div className="dd-exchange__log">{renderFilesGallery}</div>
-          ) : (
-            <div className="dd-exchange__log">
-              {hasOnlyWelcome && (
-                <div style={{ padding: '8px 0 20px' }}>
-                  <FolderFloat
-                    label="Quick prompts"
-                    sublabel="Hover or drag an item"
-                    items={[
-                      { label: 'Create notes.md summary', value: 'Create notes.md with project summary' },
-                      { label: 'Find duplicate files', value: 'Find duplicate or redundant files in workspace' },
-                      { label: 'Organise & clean filenames', value: 'Organize and rename files cleanly' },
-                      { label: 'Generate index.md contents', value: 'Generate an index.md table of contents for all files in this workspace.' },
-                      { label: 'Audit file sizes', value: 'List all file sizes and types with analysis' }
-                    ]}
-                    onSelect={(val) => handleSendMessage(val)}
-                    folderColor="#1c282d"
-                    labelColor="#93a7a4"
-                  />
+              <div className="dd-topbar__right">
+                <div className="dd-seg" role="tablist" aria-label="View">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={tab === 'chat'}
+                    className="dd-seg__btn"
+                    data-on={tab === 'chat'}
+                    onClick={() => setTab('chat')}
+                  >
+                    <MessageSquare size={13} /> Chat
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={tab === 'gallery'}
+                    className="dd-seg__btn"
+                    data-on={tab === 'gallery'}
+                    onClick={() => setTab('gallery')}
+                  >
+                    <LayoutGrid size={13} /> Gallery
+                  </button>
                 </div>
-              )}
 
-              {messages.map((msg) => {
-                const isUser = msg.role === 'user';
-                return (
-                  <article key={msg.id} className="dd-turn" data-role={msg.role}>
-                    <header className="dd-turn__who">
-                      <span className="dd-turn__name">{isUser ? 'You' : 'Smopi'}</span>
-                      <span className="dd-turn__time">{msg.timestamp}</span>
-                    </header>
+                {status?.share_password && (
+                  <button type="button" className="dd-btn" onClick={copyPassword} title="Copy share password">
+                    {copiedPassword ? <Check size={14} /> : <KeyRound size={14} />}
+                    {copiedPassword ? 'Copied' : 'Password'}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="dd-btn dd-btn--ghost dd-btn--icon"
+                  onClick={() => setShowStudio(true)}
+                  title="Orb Studio"
+                  aria-label="Open Orb Studio"
+                >
+                  <Sliders size={15} />
+                </button>
+                <button
+                  type="button"
+                  className="dd-btn dd-btn--ghost dd-btn--icon"
+                  onClick={reset}
+                  title="New conversation"
+                  aria-label="New conversation"
+                >
+                  <RotateCcw size={15} />
+                </button>
+                {status?.is_owner && (
+                  <button type="button" className="dd-btn dd-btn--danger" onClick={onStopShare} title="Stop this share">
+                    <Power size={14} />
+                    Stop
+                  </button>
+                )}
+              </div>
+            </header>
 
-                    <div className="dd-turn__body">
-                      {isUser ? <p>{msg.text}</p> : <Markdown>{msg.text}</Markdown>}
-                    </div>
+            {tab === 'gallery' ? (
+              <div className="dd-log">
+                <div className="dd-log__inner">{renderFilesGallery}</div>
+              </div>
+            ) : isHero ? (
+              /* ---------- Hero: avatar centred, composer beneath ---------- */
+              <div className="dd-hero">
+                <motion.div
+                  layoutId="smopi-orb"
+                  transition={spring}
+                  className="dd-hero__orb"
+                >
+                  <Orb state={orbState} px={104} speed={orbSpeed} />
+                </motion.div>
 
-                    {msg.actions && msg.actions.length > 0 && (
-                      <div className="dd-ledger">
-                        {msg.actions.map((act: SmopiAction, i: number) => (
-                          <span className="dd-ledger__item" key={`${act.file}-${i}`}>
-                            <span className="dd-ledger__verb" data-kind={act.type}>
-                              {ACTION_VERB[act.type] ?? act.type}
-                            </span>
-                            <span>{act.file}</span>
-                            {act.details && <span style={{ opacity: 0.7 }}>({act.details})</span>}
-                          </span>
-                        ))}
-                      </div>
-                    )}
+                <motion.h1
+                  className="dd-hero__title"
+                  initial={reduceMotion ? false : { opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.06, duration: 0.3 }}
+                >
+                  What should I do with these files?
+                </motion.h1>
 
-                    {!isUser && msg.id !== 'welcome' && (
-                      <div className="dd-ledger" style={{ borderTop: 0, alignItems: 'center', justifyContent: 'space-between' }}>
-                        <PeekRating
-                          size={16}
-                          count={5}
-                          value={ratings[msg.id] || 0}
-                          onChange={(val) => setRatings((prev) => ({ ...prev, [msg.id]: val }))}
-                          activeColor="#c2603c"
-                          idleColor="#2a3a40"
-                          labels={['Poor', 'Fair', 'Helpful', 'Great', 'Exceptional']}
-                        />
-                        <button
-                          type="button"
-                          className="dd-btn dd-btn--ghost"
-                          onClick={() => handleCopyMessage(msg.id, msg.text)}
-                          title="Copy response"
-                        >
-                          {copiedId === msg.id ? <Check size={13} /> : <Copy size={13} />}
-                          {copiedId === msg.id ? 'Copied' : 'Copy'}
-                        </button>
-                      </div>
-                    )}
-                  </article>
-                );
-              })}
+                <motion.p
+                  className="dd-hero__sub"
+                  initial={reduceMotion ? false : { opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.12, duration: 0.3 }}
+                >
+                  {files.length === 0
+                    ? 'This drop is empty. Add a file, or ask me to create one.'
+                    : `${files.length} ${files.length === 1 ? 'file' : 'files'} in this drop.`}
+                </motion.p>
 
-              {isProcessing && (
-                <div className="dd-turn" data-role="model">
-                  <ThoughtLine
-                    label={`Smopi is ${orbState}\u2026`}
-                    glyph="orb"
-                    orbState={orbState}
-                    steps={[
-                      'Scanning the drop and permissions',
-                      'Tuning context for the model',
-                      'Executing file operations'
-                    ]}
-                    working={true}
-                    showTimer={true}
-                    fontSize={14}
-                    color="#93a7a4"
+                <motion.div
+                  className="dd-hero__composer"
+                  initial={reduceMotion ? false : { opacity: 0, y: 14 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.16, duration: 0.3 }}
+                >
+                  <Composer
+                    value={input}
+                    onChange={setInput}
+                    onSend={() => submit()}
+                    onStop={stop}
+                    onAttach={onUploadClick}
+                    isProcessing={isProcessing}
+                    placeholder="Ask Smopi anything about these files\u2026"
+                    autoFocus
                   />
-                </div>
-              )}
+                </motion.div>
 
-              <div ref={messagesEndRef} />
-            </div>
-          )}
-
-          {/* Composer */}
-          <div className="dd-composer">
-            {usePromptBar ? (
-              <PromptBar
-                placeholder="Ask Smopi to summarise, inspect or organise files\u2026 (/ for commands)"
-                busy={isProcessing}
-                onSend={(text) => handleSendMessage(text)}
-                onStop={() => setIsProcessing(false)}
-                onAttach={() => {
-                  onUploadClick();
-                  return undefined;
-                }}
-                background="#0a1013"
-                color="#e8edec"
-                menuBackground="#131c20"
-                sparkColor="#c2603c"
-                radius={3}
-                commands={[
-                  { key: 'summarize', name: 'summarize', description: 'Summarise everything in the drop' },
-                  { key: 'organize', name: 'organize', description: 'Organise and standardise filenames' },
-                  { key: 'index', name: 'index', description: 'Generate index.md table of contents' },
-                  { key: 'duplicates', name: 'duplicates', description: 'Find duplicate or redundant files' },
-                  { key: 'sizes', name: 'sizes', description: 'List file sizes and types with analysis' }
-                ]}
-                models={[
-                  { key: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash', tag: 'Fast' },
-                  { key: 'smopi-agent', name: 'Smopi Agent', tag: 'Tool-use' },
-                  { key: 'smopi-pro', name: 'Smopi Pro', tag: 'Reasoning' }
-                ]}
-                sources={[
-                  { key: 'workspace', name: `Drop (${files.length} files)`, description: 'Files in this share' }
-                ]}
-              />
+                <motion.div
+                  className="dd-chips"
+                  initial={reduceMotion ? false : { opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 0.22, duration: 0.3 }}
+                >
+                  {SUGGESTIONS.map((s, i) => (
+                    <motion.button
+                      key={s.label}
+                      type="button"
+                      className="dd-chip"
+                      onClick={() => submit(s.prompt)}
+                      initial={reduceMotion ? false : { opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.24 + i * 0.04, duration: 0.25 }}
+                      whileHover={reduceMotion ? undefined : { y: -2 }}
+                      whileTap={{ scale: 0.97 }}
+                    >
+                      {s.label}
+                    </motion.button>
+                  ))}
+                </motion.div>
+              </div>
             ) : (
-              <div className="dd-composer__box">
-                <textarea
-                  ref={textareaRef}
-                  className="dd-composer__input"
-                  rows={1}
-                  placeholder="Ask Smopi to summarise, inspect or organise files\u2026"
-                  aria-label="Message Smopi"
-                  value={inputPrompt}
-                  onChange={(e) => setInputPrompt(e.target.value)}
-                  onKeyDown={handleKeyDown}
+              /* ---------- Conversation ---------- */
+              <>
+                <MessageList
+                  messages={messages}
+                  phase={phase}
+                  toolDetail={toolDetail}
+                  orbState={orbState}
+                  copiedId={copiedId}
+                  onCopy={handleCopy}
                 />
-                <SlingButton
-                  onSend={() => handleSendMessage()}
-                  size={32}
-                  padColor="#c2603c"
-                  iconColor="#0e1518"
-                  disabled={!inputPrompt.trim() || isProcessing}
-                  ariaLabel="Send message"
-                />
-              </div>
+                <div className="dd-dock">
+                  <div className="dd-dock__inner">
+                    <Composer
+                      value={input}
+                      onChange={setInput}
+                      onSend={() => submit()}
+                      onStop={stop}
+                      onAttach={onUploadClick}
+                      isProcessing={isProcessing}
+                    />
+                    <p className="dd-dock__note">
+                      Smopi can modify files in this drop. Changes are immediate.
+                    </p>
+                  </div>
+                </div>
+              </>
             )}
-
-            <div className="dd-composer__hint">
-              <span>
-                <kbd>Enter</kbd> to send \u00b7 <kbd>Shift</kbd>+<kbd>Enter</kbd> for a new line
-              </span>
-              <SquishSwitch
-                checked={usePromptBar}
-                onChange={setUsePromptBar}
-                label="Command composer"
-                width={40}
-                height={20}
-                trackColor="#1c282d"
-                trackOnColor="#c2603c"
-              />
-            </div>
-          </div>
-        </section>
+          </LayoutGroup>
+        </main>
       </div>
 
-      {/* ---- Orb Studio ------------------------------------------------- */}
-      {showOrbStudio && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label="Orb Studio"
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 99999,
-            backgroundColor: 'rgba(10, 16, 19, 0.82)',
-            display: 'grid',
-            placeItems: 'center',
-            padding: '20px'
-          }}
-          onClick={() => setShowOrbStudio(false)}
-        >
-          <div
-            className="dd-root"
-            style={{
-              position: 'relative',
-              display: 'block',
-              inset: 'auto',
-              backgroundColor: '#131c20',
-              border: '1px solid #1c282d',
-              borderRadius: '3px',
-              padding: '24px',
-              width: '100%',
-              maxWidth: '640px',
-              maxHeight: '90vh',
-              overflowY: 'auto'
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: '20px' }}>
-              <div>
-                <h3 className="dd-title" style={{ fontSize: '1.25rem' }}>Orb Studio</h3>
-                <p className="dd-count" style={{ margin: '2px 0 0' }}>
-                  Nine hand-tuned states for the thinking indicator
-                </p>
-              </div>
-              <button type="button" className="dd-btn dd-btn--ghost" onClick={() => setShowOrbStudio(false)} aria-label="Close Orb Studio">
-                Close
-              </button>
-            </div>
-
-            {/* Dual-scale preview */}
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-                gap: '16px',
-                padding: '24px',
-                backgroundColor: orbDark ? '#0a1013' : '#e8edec',
-                color: orbDark ? '#e8edec' : '#0e1518',
-                border: '1px solid #1c282d',
-                borderRadius: '3px',
-                marginBottom: '20px'
-              }}
-            >
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
-                <ThinkingOrb state={orbState} size={64} theme={orbDark ? 'dark' : 'light'} speed={orbSpeed} />
-                <span style={{ fontSize: '0.6875rem', opacity: 0.75 }}>Avatar scale, 64px</span>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <ThinkingOrb state={orbState} size={20} theme={orbDark ? 'dark' : 'light'} speed={orbSpeed} />
-                  <span style={{ fontSize: '0.8125rem' }}>Inline scale, 20px</span>
-                </div>
-                <span style={{ fontSize: '0.6875rem', opacity: 0.75 }}>State: {orbState}</span>
-              </div>
-            </div>
-
-            {/* State grid */}
-            <div style={{ marginBottom: '20px' }}>
-              <label className="dd-label" style={{ display: 'block', marginBottom: '8px' }}>
-                Active state
-              </label>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
-                {(['working', 'searching', 'solving', 'listening', 'connecting', 'weaving', 'composing', 'breathing', 'shaping'] as OrbState[]).map((st) => (
-                  <button
-                    key={st}
-                    type="button"
-                    className="dd-btn"
-                    style={{
-                      justifyContent: 'flex-start',
-                      borderColor: orbState === st ? '#c2603c' : '#1c282d',
-                      color: orbState === st ? '#c2603c' : '#e8edec'
-                    }}
-                    onClick={() => setOrbState(st)}
-                  >
-                    <ThinkingOrb state={st} size={20} theme={orbDark ? 'dark' : 'light'} />
-                    <span>{st}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Controls */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '14px', flexWrap: 'wrap', paddingTop: '16px', borderTop: '1px solid #1c282d' }}>
-              <SquishSwitch
-                checked={orbDark}
-                onChange={setOrbDark}
-                label="Dark tuning"
-                width={48}
-                height={24}
-                trackColor="#1c282d"
-                trackOnColor="#c2603c"
-              />
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <label htmlFor="orb-speed" className="dd-label">Speed {orbSpeed}x</label>
-                <input
-                  id="orb-speed"
-                  type="range"
-                  min="0.5"
-                  max="2"
-                  step="0.1"
-                  value={orbSpeed}
-                  onChange={(e) => setOrbSpeed(parseFloat(e.target.value))}
-                  style={{ width: '110px', cursor: 'pointer', accentColor: '#c2603c' }}
-                />
-              </div>
-              <SlingButton
-                onSend={() => setShowOrbStudio(false)}
-                size={32}
-                padColor="#c2603c"
-                iconColor="#0e1518"
-                ariaLabel="Close Orb Studio"
-              />
-            </div>
-
-            <div style={{ borderTop: '1px solid #1c282d', paddingTop: '16px', marginTop: '16px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                <span className="dd-label">Dodge field</span>
-                <span className="dd-count">Cursor physics</span>
-              </div>
-              <Suspense fallback={<div style={{ height: 100 }} aria-busy="true" />}>
-                <DodgeField
-                  fieldHeight={100}
-                  patience={3}
-                  taunts={['Catch the orb', 'Too fast', 'Almost', 'Caught']}
-                  onCatch={() => setOrbState('composing')}
-                  inkColor="#93a7a4"
-                  contrastColor="#c2603c"
-                />
-              </Suspense>
-            </div>
-          </div>
-        </div>
-      )}
+      <OrbStudio
+        open={showStudio}
+        onClose={() => setShowStudio(false)}
+        orbState={orbState}
+        setOrbState={setOrbState}
+        orbSpeed={orbSpeed}
+        setOrbSpeed={setOrbSpeed}
+      />
     </div>
   );
 };

@@ -639,6 +639,25 @@ function isTransientError(err: any): boolean {
   );
 }
 
+/**
+ * Shared system prompt for both the buffered and streaming agents, so the two
+ * code paths cannot drift apart in tone or capability.
+ */
+const SMOPI_SYSTEM_INSTRUCTION = `You are "Smopi", an intelligent, highly skilled AI file management assistant embedded in a secure, temporary file sharing workspace.
+
+Your capabilities include:
+1. Managing files: listing, reading, creating, modifying, renaming, organizing, and deleting files.
+2. Generating documentation, reports, summaries (like INDEX.md, WORKSPACE_SUMMARY.md, or project READMEs).
+3. Analyzing and transforming content (e.g. formatting Markdown, converting JSON to CSV/tables, proofreading notes).
+4. Organizing messy file lists (standardizing naming conventions, detecting duplicates).
+
+Rules:
+- Be concise, friendly, helpful, and proactive.
+- When the user asks you to create, modify, or organize files, execute the appropriate tool(s) directly.
+- Always provide clear summaries of changes made and highlight affected filenames in backticks (e.g. \`notes.md\`).
+- If a file doesn't exist, tell the user politely and offer to list existing files or create it.
+- Keep output nicely formatted using Markdown headings, bold text, and bullet points.`;
+
 async function generateContentWithRetry(
   ai: GoogleGenAI,
   params: {
@@ -693,20 +712,7 @@ export async function runSmopiAgent(
   }
 
   const actionsTaken: ActionRecord[] = [];
-  const systemInstruction = `You are "Smopi", an intelligent, highly skilled AI file management assistant embedded in a secure, temporary file sharing workspace.
-
-Your capabilities include:
-1. Managing files: listing, reading, creating, modifying, renaming, organizing, and deleting files.
-2. Generating documentation, reports, summaries (like INDEX.md, WORKSPACE_SUMMARY.md, or project READMEs).
-3. Analyzing and transforming content (e.g. formatting Markdown, converting JSON to CSV/tables, proofreading notes).
-4. Organizing messy file lists (standardizing naming conventions, detecting duplicates).
-
-Rules:
-- Be concise, friendly, helpful, and proactive.
-- When the user asks you to create, modify, or organize files, execute the appropriate tool(s) directly.
-- Always provide clear summaries of changes made and highlight affected filenames in backticks (e.g. \`notes.md\`).
-- If a file doesn't exist, tell the user politely and offer to list existing files or create it.
-- Keep output nicely formatted using Markdown headings, bold text, and bullet points.`;
+  const systemInstruction = SMOPI_SYSTEM_INSTRUCTION;
 
   try {
     // Construct initial contents with chat history
@@ -789,5 +795,170 @@ Rules:
       : 'Gemini service is temporarily unreachable. Smopi processed your request using the built-in local workspace engine.';
     fallback.text = `*(Notice: ${notice})*\n\n` + fallback.text;
     return fallback;
+  }
+}
+
+/**
+ * Events emitted by `runSmopiAgentStream` as the agent works.
+ *
+ * The client renders these in order: `status` drives the orb/thinking line,
+ * `action` appends to the ledger the moment a file is touched (rather than
+ * only at the end), `delta` carries the incremental answer text, and exactly
+ * one terminal `done` or `error` closes the stream.
+ */
+export type SmopiStreamEvent =
+  | { type: 'status'; phase: 'thinking' | 'tooling' | 'writing'; detail?: string }
+  | { type: 'action'; action: ActionRecord }
+  | { type: 'delta'; text: string }
+  | { type: 'done'; text: string; actionsTaken: ActionRecord[]; hasApiKey: boolean; model: string }
+  | { type: 'error'; error: string };
+
+/**
+ * Streaming counterpart of `runSmopiAgent`.
+ *
+ * The multi-step function-calling loop cannot be streamed meaningfully (each
+ * step must complete before the next can be planned), so tool rounds are run
+ * to completion while emitting `status`/`action` events for live feedback.
+ * Only the model's final prose is streamed token-by-token via `delta`.
+ *
+ * This never throws: every failure path, including the local-engine fallback,
+ * is reported through `emit` so the caller can always close the SSE stream
+ * cleanly.
+ */
+export async function runSmopiAgentStream(
+  userMessage: string,
+  shareDir: string,
+  history: { role: 'user' | 'model'; text: string }[] = [],
+  emit: (event: SmopiStreamEvent) => void
+): Promise<void> {
+  const ai = getGenAI();
+
+  // No API key: the local engine is synchronous, so emit its text as one delta.
+  if (!ai) {
+    const local = processLocalCommand(userMessage, shareDir);
+    for (const action of local.actionsTaken) emit({ type: 'action', action });
+    emit({ type: 'delta', text: local.text });
+    emit({
+      type: 'done',
+      text: local.text,
+      actionsTaken: local.actionsTaken,
+      hasApiKey: false,
+      model: local.model
+    });
+    return;
+  }
+
+  const actionsTaken: ActionRecord[] = [];
+  const systemInstruction = SMOPI_SYSTEM_INSTRUCTION;
+
+  try {
+    const contents: any[] = [];
+    for (const h of history.slice(-4)) {
+      contents.push({ role: h.role, parts: [{ text: h.text }] });
+    }
+    contents.push({ role: 'user', parts: [{ text: userMessage }] });
+
+    emit({ type: 'status', phase: 'thinking' });
+
+    let { response: currentResponse, modelUsed } = await generateContentWithRetry(ai, {
+      contents,
+      systemInstruction,
+      tools: [{ functionDeclarations: smopiTools }],
+      temperature: 0.4
+    });
+
+    // Resolve all tool rounds first, reporting each mutation as it happens.
+    let iterations = 0;
+    while (currentResponse.functionCalls && currentResponse.functionCalls.length > 0 && iterations < 4) {
+      iterations++;
+      const functionCalls = currentResponse.functionCalls;
+      const modelContent = currentResponse.candidates?.[0]?.content;
+      if (modelContent) contents.push(modelContent);
+
+      const toolResponseParts: any[] = [];
+      for (const call of functionCalls) {
+        const callName = call.name || '';
+        emit({ type: 'status', phase: 'tooling', detail: callName });
+
+        const before = actionsTaken.length;
+        const { result, error } = executeSmopiTool(callName, call.args || {}, shareDir, actionsTaken);
+        // Surface newly recorded actions immediately for a live ledger.
+        for (const action of actionsTaken.slice(before)) emit({ type: 'action', action });
+
+        toolResponseParts.push({
+          functionResponse: {
+            name: callName,
+            response: error ? { error } : (result || { success: true })
+          }
+        });
+      }
+
+      contents.push({ role: 'user', parts: toolResponseParts });
+
+      const next = await generateContentWithRetry(ai, {
+        contents,
+        systemInstruction,
+        tools: [{ functionDeclarations: smopiTools }],
+        temperature: 0.4
+      });
+      currentResponse = next.response;
+      modelUsed = next.modelUsed;
+    }
+
+    // Stream the closing prose. Tools are deliberately omitted here: the loop
+    // above already settled them, and re-offering them risks another call we
+    // would have to buffer rather than stream.
+    emit({ type: 'status', phase: 'writing' });
+
+    let streamed = '';
+    try {
+      const stream = await ai.models.generateContentStream({
+        model: modelUsed,
+        contents,
+        config: { systemInstruction, temperature: 0.4 }
+      });
+      for await (const chunk of stream) {
+        const piece = chunk.text;
+        if (piece) {
+          streamed += piece;
+          emit({ type: 'delta', text: piece });
+        }
+      }
+    } catch {
+      // Streaming failed after tools already ran. Fall back to the text the
+      // non-streaming loop produced so the user's work is never lost.
+      streamed = '';
+    }
+
+    const finalText =
+      streamed.trim() ||
+      currentResponse.text ||
+      'I completed the requested file actions in your workspace.';
+
+    // If streaming yielded nothing, the client has received no delta yet.
+    if (!streamed.trim()) emit({ type: 'delta', text: finalText });
+
+    emit({ type: 'done', text: finalText, actionsTaken, hasApiKey: true, model: modelUsed });
+  } catch (err: any) {
+    const isDemandSpike = isTransientError(err);
+    console.warn(
+      `Smopi(stream): Gemini API ${isDemandSpike ? 'high demand / transient unavailable' : 'error'} (${err?.status || err?.code || 'transient'}). Serving via local workspace engine.`
+    );
+
+    const fallback = processLocalCommand(userMessage, shareDir);
+    const notice = isDemandSpike
+      ? 'Gemini AI is currently experiencing high demand. Smopi seamlessly handled your request using the built-in local workspace engine.'
+      : 'Gemini service is temporarily unreachable. Smopi processed your request using the built-in local workspace engine.';
+    const text = `*(Notice: ${notice})*\n\n` + fallback.text;
+
+    for (const action of fallback.actionsTaken) emit({ type: 'action', action });
+    emit({ type: 'delta', text });
+    emit({
+      type: 'done',
+      text,
+      actionsTaken: fallback.actionsTaken,
+      hasApiKey: false,
+      model: fallback.model
+    });
   }
 }

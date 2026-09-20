@@ -105,6 +105,8 @@ export interface SmopiMessage {
   timestamp: string;
   /** Display label for the backing model, e.g. "Gemini 3.8 Flash". */
   model?: string;
+  /** True while tokens are still arriving for this turn (drives the caret). */
+  streaming?: boolean;
 }
 
 /**
