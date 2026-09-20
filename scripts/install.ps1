@@ -1,3 +1,13 @@
+# ============================================================================
+#  UNMAINTAINED / UNSUPPORTED FOR THIS REPOSITORY
+#
+#  This Windows installer still targets the old JCVERSA/file layout and the
+#  dist/server.mjs artifact. This repo is JCVERSA/smopi and builds
+#  dist/server.cjs, so this script WILL FAIL. It is kept only for reference.
+#
+#  Supported path: Linux via scripts/install.sh  (see README.md / DEPLOY.md)
+# ============================================================================
+
 # File Share installer (Windows PowerShell 5.1+ / PowerShell 7)
 #
 # Install or update:

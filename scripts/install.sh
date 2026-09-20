@@ -2,22 +2,22 @@
 # ============================================================================
 #  FILE SHARE — one-line installer (Node/Express + React 19)
 #
-#  Repo   : https://github.com/JCVERSA/file
+#  Repo   : https://github.com/JCVERSA/smopi
 #  Branch : main (override with --branch or FS_BRANCH)
 #
 #  Usage (from any Debian/Ubuntu VPS or container):
-#    curl -fsSL "https://raw.githubusercontent.com/JCVERSA/file/main/scripts/install.sh" | sh
+#    curl -fsSL "https://raw.githubusercontent.com/JCVERSA/smopi/main/scripts/install.sh" | sh
 #
 #  Or interactively (recommended — lets you configure .env at the end):
-#    sh -c "$(curl -fsSL https://raw.githubusercontent.com/JCVERSA/file/main/scripts/install.sh)"
+#    sh -c "$(curl -fsSL https://raw.githubusercontent.com/JCVERSA/smopi/main/scripts/install.sh)"
 #
 #  The script is idempotent: re-running it updates an existing installation.
-#  At the end the `fsd` command is available everywhere (see: fsd help).
+#  At the end the `sdf` command is available everywhere (see: sdf help).
 #
 #  Options:
-#    --dir PATH          install directory (default /opt/file-share as root,
-#                        else ~/.local/share/file-share)
-#    --bin-dir PATH      directory for the `fsd` launcher (default
+#    --dir PATH          install directory (default /opt/smopi as root,
+#                        else ~/.local/share/smopi)
+#    --bin-dir PATH      directory for the `sdf` launcher (default
 #                        /usr/local/bin as root, else ~/.local/bin)
 #    --branch NAME       git branch to install (default main)
 #    --source-dir PATH   install from an existing checkout instead of GitHub
@@ -29,11 +29,11 @@
 # ============================================================================
 set -eu
 
-REPO_URL="${FS_REPO_URL:-https://github.com/JCVERSA/file}"
-BRANCH="${FS_BRANCH:-main}"
-RAW_BASE="https://raw.githubusercontent.com/JCVERSA/file"
-APP_NAME="file-share"
-COMMAND_NAME="fsd"
+REPO_URL="${FS_REPO_URL:-https://github.com/JCVERSA/smopi}"
+BRANCH="${FS_BRANCH:-arena/01a0bf28-smopi}"
+RAW_BASE="https://raw.githubusercontent.com/JCVERSA/smopi"
+APP_NAME="smopi"
+COMMAND_NAME="sdf"
 SKIP_BUILD="${FS_SKIP_BUILD:-0}"
 SOURCE_DIR=""
 
@@ -49,7 +49,7 @@ while [ $# -gt 0 ]; do
                   SOURCE_DIR="$2"; shift 2 ;;
     --skip-build) SKIP_BUILD=1; shift ;;
     --help|-h)
-      sed -n '2,33p' "$0" 2>/dev/null || echo "See https://github.com/JCVERSA/file"
+      sed -n '2,33p' "$0" 2>/dev/null || echo "See https://github.com/JCVERSA/smopi"
       exit 0 ;;
     *) printf 'Unknown option: %s (try --help)\n' "$1" >&2; exit 1 ;;
   esac
@@ -73,7 +73,7 @@ ask_yes_no() { # $1 question - default no
 }
 
 # ---------------------------------------------------------------------------
-step "1/7 · Base checks"
+step "1/8 · Base checks"
 # ---------------------------------------------------------------------------
 [ "$(uname -s)" = "Linux" ] || fail "This script targets Linux (detected: $(uname -s))."
 case "$(uname -m)" in
@@ -82,10 +82,10 @@ case "$(uname -m)" in
 esac
 
 if [ "$(id -u)" -eq 0 ]; then
-  INSTALL_DIR="${FS_INSTALL_DIR:-/opt/file-share}"
+  INSTALL_DIR="${FS_INSTALL_DIR:-/opt/smopi}"
   BIN_DIR="${FS_BIN_DIR:-/usr/local/bin}"
 else
-  INSTALL_DIR="${FS_INSTALL_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/file-share}"
+  INSTALL_DIR="${FS_INSTALL_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/smopi}"
   BIN_DIR="${FS_BIN_DIR:-${XDG_BIN_HOME:-$HOME/.local/bin}}"
   warn "Non-root mode: installing into ${INSTALL_DIR} and ${BIN_DIR}."
 fi
@@ -146,7 +146,7 @@ try_userland_node() {
 }
 
 # ---------------------------------------------------------------------------
-step "2/7 · Node.js (>= 22)"
+step "2/8 · Node.js (>= 22)"
 # ---------------------------------------------------------------------------
 NODE_MAJOR=0
 if command -v node >/dev/null 2>&1; then
@@ -181,19 +181,19 @@ fi
 ok "node $(node -v) / npm $(npm -v)"
 
 # ---------------------------------------------------------------------------
-step "3/7 · Fetching the code"
+step "3/8 · Fetching the code"
 # ---------------------------------------------------------------------------
 if [ -n "$SOURCE_DIR" ]; then
   # Install from an existing checkout (no network, no git history kept).
   SOURCE_DIR=$(CDPATH= cd -- "$SOURCE_DIR" && pwd)
   [ -f "$SOURCE_DIR/package.json" ] || fail "Invalid source dir: $SOURCE_DIR (missing package.json)."
   [ -f "$SOURCE_DIR/server.ts" ]  || fail "Invalid source dir: $SOURCE_DIR (missing server.ts)."
-  # Refuse to wipe a directory that does not look like a previous File Share
+  # Refuse to wipe a directory that does not look like a previous Smopi File Share
   # install (defense against a mistyped FS_INSTALL_DIR).
   if [ -d "$INSTALL_DIR" ] && [ -n "$(ls -A "$INSTALL_DIR" 2>/dev/null)" ]; then
     { [ -f "$INSTALL_DIR/server.ts" ] && [ -f "$INSTALL_DIR/package.json" ]; } \
-      || [ -d "$INSTALL_DIR/.fsd" ] \
-      || fail "$INSTALL_DIR exists and does not look like a File Share install - refusing to overwrite. Remove it or choose another --dir."
+      || [ -d "$INSTALL_DIR/.sdf" ] \
+      || fail "$INSTALL_DIR exists and does not look like a Smopi File Share install - refusing to overwrite. Remove it or choose another --dir."
     # Preserve user data across a source-dir reinstall.
     PRESERVE_DIR="$(mktemp -d)"
     [ -f "$INSTALL_DIR/.env" ]         && mv "$INSTALL_DIR/.env" "$PRESERVE_DIR/.env"
@@ -203,7 +203,7 @@ if [ -n "$SOURCE_DIR" ]; then
   mkdir -p "$INSTALL_DIR"
   ( cd "$SOURCE_DIR" && tar -cf - . ) | ( cd "$INSTALL_DIR" && tar -xf - )
   rm -rf "$INSTALL_DIR/.git" "$INSTALL_DIR/node_modules" "$INSTALL_DIR/dist" \
-         "$INSTALL_DIR/shared_files" "$INSTALL_DIR/.fsd"
+         "$INSTALL_DIR/shared_files" "$INSTALL_DIR/.sdf"
   # Restore preserved user data on top of the fresh staging.
   if [ -n "${PRESERVE_DIR:-}" ]; then
     [ -f "$PRESERVE_DIR/.env" ]         && mv "$PRESERVE_DIR/.env" "$INSTALL_DIR/.env"
@@ -250,25 +250,25 @@ fi
 
 # Validate the fetched tree BEFORE touching the launcher - catches installing
 # from a branch that predates scripts/ (e.g. an unmerged `main`), with a clear
-# error instead of a cryptic `chmod: cannot access scripts/fsd.sh`.
-if [ ! -f "$INSTALL_DIR/server.ts" ] || [ ! -f "$INSTALL_DIR/scripts/fsd.sh" ]; then
-  fail "Branch '${BRANCH}' does not contain the File Share code (scripts/fsd.sh missing).
-  Use --branch <branch-with-scripts>, e.g.:  --branch arena/01a0b7f8-file"
+# error instead of a cryptic `chmod: cannot access scripts/sdf.sh`.
+if [ ! -f "$INSTALL_DIR/server.ts" ] || [ ! -f "$INSTALL_DIR/scripts/sdf.sh" ]; then
+  fail "Branch '${BRANCH}' does not contain the Smopi File Share code (scripts/sdf.sh missing).
+  Use --branch <branch-with-scripts>, e.g.:  --branch arena/01a0bf28-smopi"
 fi
 
 # ---------------------------------------------------------------------------
-step "4/7 · Launcher command '${COMMAND_NAME}'"
+step "4/8 · Launcher command '${COMMAND_NAME}'"
 # ---------------------------------------------------------------------------
 mkdir -p "$BIN_DIR"
-ln -sf "$INSTALL_DIR/scripts/fsd.sh" "$BIN_DIR/$COMMAND_NAME"
-chmod +x "$INSTALL_DIR/scripts/fsd.sh"
-mkdir -p "$INSTALL_DIR/.fsd"
-printf '%s\n' "$BIN_DIR" > "$INSTALL_DIR/.fsd/bin_dir"
+ln -sf "$INSTALL_DIR/scripts/sdf.sh" "$BIN_DIR/$COMMAND_NAME"
+chmod +x "$INSTALL_DIR/scripts/sdf.sh"
+mkdir -p "$INSTALL_DIR/.sdf"
+printf '%s\n' "$BIN_DIR" > "$INSTALL_DIR/.sdf/bin_dir"
 
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
   *)
-    MARKER="# Added by File Share (fsd) installer"
+    MARKER="# Added by Smopi File Share (sdf) installer"
     for prof in "$HOME/.profile" "$HOME/.bashrc"; do
       [ -f "$prof" ] || continue
       grep -qF "$BIN_DIR" "$prof" 2>/dev/null && continue
@@ -281,42 +281,61 @@ esac
 ok "Command \`${COMMAND_NAME}\` installed -> ${BIN_DIR}/${COMMAND_NAME}"
 
 # ---------------------------------------------------------------------------
-step "5/7 · Dependencies + build"
+step "5/8 · Dependencies + build"
 # ---------------------------------------------------------------------------
 if [ "$SKIP_BUILD" = "1" ]; then
   warn "FS_SKIP_BUILD=1 - npm install + build skipped (test mode)."
 else
-  sh "$INSTALL_DIR/scripts/fsd.sh" setup || fail "Setup failed (npm install / build). See the messages above."
+  sh "$INSTALL_DIR/scripts/sdf.sh" setup || fail "Setup failed (npm install / build). See the messages above."
 fi
 
-[ -f "$INSTALL_DIR/dist/server.mjs" ] || warn "dist/server.mjs missing - run: fsd setup"
+[ -f "$INSTALL_DIR/dist/server.cjs" ] || warn "dist/server.cjs missing - run: sdf setup"
 
 # ---------------------------------------------------------------------------
-step "6/7 · Configuration (.env)"
+step "6/8 · Configuration (.env)"
 # ---------------------------------------------------------------------------
 if [ ! -f "$INSTALL_DIR/.env" ]; then
   if cp "$INSTALL_DIR/.env.example" "$INSTALL_DIR/.env" 2>/dev/null; then
     ok ".env created from the example (defaults applied)."
   else
-    warn "Could not create .env - create it with: fsd env init"
+    warn "Could not create .env - create it with: sdf env init"
   fi
   if ask_yes_no "Configure the .env now (set SHARE_PASSWORD, PORT, ...)?"; then
-    sh "$INSTALL_DIR/scripts/fsd.sh" env || warn "Configurator interrupted - rerun: fsd env"
+    sh "$INSTALL_DIR/scripts/sdf.sh" env || warn "Configurator interrupted - rerun: sdf env"
   else
-    printf '    Later: \033[1mfsd env\033[0m  (or: fsd env set SHARE_PASSWORD yoursecret)\n'
+    printf '    Later: \033[1msdf env\033[0m  (or: sdf env set SHARE_PASSWORD yoursecret)\n'
   fi
 else
   ok ".env already present (kept - not modified)."
 fi
 
 # ---------------------------------------------------------------------------
-step "7/7 · Summary"
+step "7/8 · Service (systemd)"
+# ---------------------------------------------------------------------------
+if [ "$(id -u)" -eq 0 ] && command -v systemctl >/dev/null 2>&1 && systemctl list-units >/dev/null 2>&1; then
+  if sh "$INSTALL_DIR/scripts/sdf.sh" service install; then
+    ok "Autostart enabled - the share restarts on boot and on failure."
+  else
+    warn "Could not install the systemd unit - 'sdf start' will use nohup."
+  fi
+else
+  info_msg="systemd unavailable (non-root or no system manager) - 'sdf start' uses nohup."
+  warn "$info_msg"
+fi
+
+# ---------------------------------------------------------------------------
+step "8/8 · Diagnostic"
+# ---------------------------------------------------------------------------
+sh "$INSTALL_DIR/scripts/sdf.sh" doctor || warn "Doctor reported problems (see above)."
+
+# ---------------------------------------------------------------------------
+step "Summary"
 # ---------------------------------------------------------------------------
 VERSION_LINE="$(git -C "$INSTALL_DIR" log -1 --format='%h %s' 2>/dev/null || echo 'local source')"
 
 printf '\n'
 printf '\033[1;36m=====================================================\033[0m\n'
-printf '\033[1m  FILE SHARE installed successfully\033[0m\n'
+printf '\033[1m  SMOPI FILE SHARE installed successfully\033[0m\n'
 printf '\033[1;36m=====================================================\033[0m\n'
 printf '  Directory : %s\n' "$INSTALL_DIR"
 printf '  Version   : %s (%s)\n' "$VERSION_LINE" "$BRANCH"

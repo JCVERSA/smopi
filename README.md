@@ -60,29 +60,53 @@ flowchart TD
 
 ## Install (one-liner)
 
-The recommended way to run the share on a server. Installs Node.js 22+ if
-needed, clones the repo, builds `dist/server.mjs`, and exposes the `fsd`
-command (start/stop/status/env/update/uninstall).
+The recommended way to run the share on a Linux VPS. Installs Node.js 22 if
+needed, clones the repo, builds `dist/server.cjs`, installs the `sdf` command,
+sets up a systemd service (when run as root) and runs a diagnostic.
 
 ```bash
-# Linux / macOS
-curl -fsSL https://raw.githubusercontent.com/JCVERSA/file/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/JCVERSA/smopi/arena/01a0bf28-smopi/scripts/install.sh | sh
+```
 
-# Windows (PowerShell)
-irm https://raw.githubusercontent.com/JCVERSA/file/main/scripts/install.ps1 | iex
+Interactive (recommended — offers the `.env` wizard at the end):
+
+```bash
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/JCVERSA/smopi/arena/01a0bf28-smopi/scripts/install.sh)"
 ```
 
 Then configure a password and start:
 
 ```bash
-fsd env set SHARE_PASSWORD my-secret
-fsd start        # production server (background), default port 3000
-fsd status       # share stats
+sdf env            # interactive wizard (password, port, expiry, owner secret)
+sdf start          # production server, autostarts on boot under systemd
+sdf status         # share stats
+sdf doctor         # full diagnostic
 ```
 
-See `fsd help` for the full command set, or `fsd uninstall` to remove.
-The installer also accepts `--source-dir <checkout>` to install from local
-code and `--branch <name>` to pick a branch.
+The installer is **idempotent** — re-running it updates the installation and
+preserves your `.env` and `shared_files/`.
+
+Options: `--dir PATH`, `--bin-dir PATH`, `--branch NAME`, `--source-dir PATH`
+(install from a local checkout), `--skip-build`.
+
+### `sdf` commands
+
+| Command | What it does |
+|---|---|
+| `sdf setup` | `npm install` + build |
+| `sdf start` / `stop` / `restart` | Lifecycle (systemd when root, else nohup) |
+| `sdf status` | Live share stats from `/api/status` |
+| `sdf doctor` | Diagnose node, build, `.env`, port, disk, permissions |
+| `sdf logs [n]` | Tail the log (`journalctl` under systemd) |
+| `sdf env [wizard\|show\|get\|set\|unset]` | Manage `.env`, secrets masked |
+| `sdf service install\|remove\|status` | Manage the systemd unit |
+| `sdf test` | Run the 34-test smoke suite |
+| `sdf update` | `git pull --ff-only` + rebuild + restart |
+| `sdf uninstall` | Remove the install (keeps shared files by default) |
+
+> **Linux only.** `scripts/install.ps1` (Windows) is **not maintained** for this
+> repo and still targets the old `JCVERSA/file` layout — do not use it.
+> For manual/systemd/nginx setup, see **[DEPLOY.md](DEPLOY.md)**.
 
 ## Quick start (developer)
 
