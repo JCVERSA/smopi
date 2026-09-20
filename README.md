@@ -99,7 +99,7 @@ Production build & run:
 
 ```bash
 npm run build
-SHARE_PASSWORD=my-secret npm start   # node dist/server.mjs
+SHARE_PASSWORD=my-secret npm start   # node dist/server.cjs
 ```
 
 ## Scripts
@@ -107,10 +107,10 @@ SHARE_PASSWORD=my-secret npm start   # node dist/server.mjs
 | Script | What it does |
 |---|---|
 | `npm run dev` | tsx dev server (Express + Vite middleware) |
-| `npm run build` | Vite client build + esbuild ESM server bundle (`dist/server.mjs`) |
+| `npm run build` | Vite client build + esbuild CJS server bundle (`dist/server.cjs`) |
 | `npm start` | Run the production server bundle |
-| `npm run lint` | `tsc --noEmit` with `noUnusedLocals`/`noUnusedParameters` |
-| `npm test` | End-to-end smoke suite (`node --test tests/`) |
+| `npm run lint` | `tsc --noEmit` (type check only; no ESLint configured) |
+| `npm test` | End-to-end smoke suite (runs `npm run build` first) |
 
 ## Configuration (environment)
 
@@ -138,11 +138,24 @@ SHARE_PASSWORD=my-secret npm start   # node dist/server.mjs
 
 ## Testing
 
-`npm test` spins up an isolated instance (random port + temp `SHARE_DIR`) and
-verifies: auth, upload/list/preview round-trip (incl. non-ASCII names),
-safe download content types/disposition, SVG neutralization, ZIP generation,
-bulk delete, owner gating, unauthenticated rejection, path traversal, and the
-same-origin guard.
+`npm test` builds the server bundle, then boots isolated instances (each on a
+random port with its own temp `SHARE_DIR`) and exercises the built artifact —
+so it validates the `npm start` path, not just the TypeScript sources.
+
+```bash
+npm test
+```
+
+Covered (31 tests): login/logout and unauthenticated rejection, password
+non-disclosure, upload + listing contract, download with Range requests,
+RFC 5987 non-ASCII `Content-Disposition`, ZIP integrity (magic bytes + EOCD),
+path traversal (URL-encoded `../`, backslash, and the content API),
+same-origin/CSRF guard, create/edit/rename/delete, overwrite refusal,
+share expiry, owner gating via `OWNER_SESSION_SECRET`, restart credential
+preservation, and error-message hygiene (no filesystem paths or errno in
+API responses).
+
+Tests require no network and no `GEMINI_API_KEY` (the AI path is not exercised).
 
 ## Notes
 
