@@ -748,8 +748,9 @@ app.post('/api/files/bulk-delete', async (req, res) => {
     try {
       await fs.promises.unlink(filePath);
       deleted.push(name);
-    } catch (err: any) {
-      errors.push(`Failed to delete ${name}: ${err.message}`);
+    } catch (err) {
+      console.error(`Bulk delete failed for "${name}":`, err);
+      errors.push(`Failed to delete ${name}`);
     }
   }
 
@@ -772,8 +773,9 @@ app.delete('/api/files/:name', async (req, res) => {
   try {
     await fs.promises.unlink(filePath);
     res.json({ success: true, deleted: name });
-  } catch (err: any) {
-    res.status(500).json({ error: `Failed to delete file: ${err.message}` });
+  } catch (err) {
+    console.error(`Delete failed for "${name}":`, err);
+    res.status(500).json({ error: 'Failed to delete file' });
   }
 });
 
@@ -882,8 +884,9 @@ app.get('/api/files/:name/content', async (req, res) => {
     }
     const content = await fs.promises.readFile(filePath, 'utf8');
     res.json({ success: true, name, content, size: stat.size });
-  } catch (err: any) {
-    res.status(500).json({ error: `Could not read file: ${err.message}` });
+  } catch (err) {
+    console.error(`Read file failed for "${name}":`, err);
+    res.status(500).json({ error: 'Could not read file' });
   }
 });
 
@@ -907,8 +910,9 @@ app.put('/api/files/:name/content', async (req, res) => {
   try {
     await fs.promises.writeFile(filePath, content, 'utf8');
     res.json({ success: true, name, size: Buffer.byteLength(content, 'utf8') });
-  } catch (err: any) {
-    res.status(500).json({ error: `Could not save file: ${err.message}` });
+  } catch (err) {
+    console.error(`Save file failed for "${name}":`, err);
+    res.status(500).json({ error: 'Could not save file' });
   }
 });
 
@@ -935,8 +939,9 @@ app.post('/api/files/create', async (req, res) => {
   try {
     await fs.promises.writeFile(filePath, content || '', 'utf8');
     res.json({ success: true, name: sanitized, size: Buffer.byteLength(content || '', 'utf8') });
-  } catch (err: any) {
-    res.status(500).json({ error: `Could not create file: ${err.message}` });
+  } catch (err) {
+    console.error(`Create file failed for "${sanitized}":`, err);
+    res.status(500).json({ error: 'Could not create file' });
   }
 });
 
@@ -968,8 +973,9 @@ app.post('/api/files/:name/rename', async (req, res) => {
   try {
     await fs.promises.rename(oldPath, newPath);
     res.json({ success: true, oldName: name, newName: sanitizedNew });
-  } catch (err: any) {
-    res.status(500).json({ error: `Could not rename file: ${err.message}` });
+  } catch (err) {
+    console.error(`Rename failed for "${name}" -> "${sanitizedNew}":`, err);
+    res.status(500).json({ error: 'Could not rename file' });
   }
 });
 

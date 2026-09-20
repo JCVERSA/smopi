@@ -6,3 +6,6 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Runtime upload directory (user files must never be committed)
+shared_files/

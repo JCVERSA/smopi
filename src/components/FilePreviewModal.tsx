@@ -30,15 +30,17 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
 
   if (!previewFile) return null;
 
+  const isTextFile = previewData?.type === 'text';
+  // Narrowed once so the text-only branches below don't have to re-discriminate.
+  const textContent = previewData?.type === 'text' ? previewData.content : undefined;
+
   const handleCopyContent = () => {
-    if (previewData?.content) {
-      navigator.clipboard.writeText(previewData.content);
+    if (textContent) {
+      navigator.clipboard.writeText(textContent);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     }
   };
-
-  const isTextFile = previewData?.type === 'text';
 
   return (
     <div
@@ -152,7 +154,7 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
                 type="button"
                 onClick={() => {
                   onClose();
-                  onEditFile(previewFile, previewData?.content);
+                  onEditFile(previewFile, textContent);
                 }}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--panel3)] border border-[var(--border)] text-[var(--text)] hover:bg-slate-800 transition-colors"
               >
