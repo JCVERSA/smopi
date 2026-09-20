@@ -1,0 +1,482 @@
+/* ===========================================================================
+   DEAD DROP — design system
+   ---------------------------------------------------------------------------
+   Subject: a temporary dead drop. Files are in transit, not in storage.
+   The share has a lifespan; that fact is the hero, expressed as the
+   "depletion spine" — a full-width hairline that shortens as time runs out.
+
+   Deliberate anti-default choices (see the four design skills):
+   - No Inter. Space Grotesk (display) + IBM Plex Sans (body), self-hosted.
+   - No pure black/grey. Every neutral is cyan-tinted.
+   - No cards-in-cards. The manifest is a table; chat has no bubbles.
+   - One accent (signal) reserved for expiry + destructive actions only.
+   - One orchestrated motion: the spine. Everything else responds to input.
+   =========================================================================== */
+
+:root {
+  /* --- palette: cyan-tinted neutrals, never #111 ------------------------ */
+  --dd-ink: #0e1518;        /* page ground */
+  --dd-raised: #131c20;     /* raised surface */
+  --dd-sunken: #0a1013;     /* wells, inputs */
+  --dd-line: #1c282d;       /* hairline */
+  --dd-line-lit: #2a3a40;   /* hairline, emphasised */
+  --dd-bone: #e8edec;       /* primary text */
+  --dd-sage: #93a7a4;       /* secondary text */
+  --dd-dim: #5f7370;        /* tertiary / disabled */
+  --dd-signal: #c2603c;     /* THE accent: expiry + destructive only */
+  --dd-signal-dim: #7d3f28;
+  --dd-go: #7fa88f;         /* confirmations; muted on purpose */
+
+  /* --- type ------------------------------------------------------------- */
+  --dd-display: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+  --dd-body: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+
+  /* Type scale (Elements of Typographic Style, ~1.25 minor third) */
+  --dd-t-xs: 0.6875rem;   /* 11px — metadata */
+  --dd-t-sm: 0.8125rem;   /* 13px — UI default */
+  --dd-t-md: 0.9375rem;   /* 15px — body copy */
+  --dd-t-lg: 1.25rem;     /* 20px — section heads */
+  --dd-t-xl: 2rem;        /* 32px — the timer */
+
+  /* --- space: 4px base --------------------------------------------------- */
+  --dd-1: 4px;  --dd-2: 8px;  --dd-3: 12px; --dd-4: 16px;
+  --dd-5: 24px; --dd-6: 32px; --dd-7: 48px;
+
+  --dd-rail: 300px;       /* manifest column */
+  --dd-radius: 3px;       /* nearly square: this is an instrument, not a toy */
+}
+
+/* --- reduced motion: honoured globally --------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  .dd-root *,
+  .dd-root *::before,
+  .dd-root *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* =========================== shell ====================================== */
+.dd-root {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  background: var(--dd-ink);
+  color: var(--dd-bone);
+  font-family: var(--dd-body);
+  font-size: var(--dd-t-sm);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---- the depletion spine: the one bold element ------------------------- */
+.dd-spine {
+  position: relative;
+  height: 2px;
+  width: 100%;
+  background: var(--dd-line);
+  overflow: hidden;
+  flex: none;
+}
+.dd-spine__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--dd-signal);
+  /* width is set inline from `remaining`; the long transition IS the motion */
+  transition: width 1s linear;
+}
+.dd-spine__fill[data-infinite='true'] {
+  width: 100% !important;
+  background: var(--dd-line-lit);
+}
+/* Under 60s the spine breathes — the only ambient motion in the product. */
+.dd-spine__fill[data-critical='true'] {
+  animation: dd-pulse 1.6s ease-in-out infinite;
+}
+@keyframes dd-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.45; }
+}
+
+/* ---- header ------------------------------------------------------------ */
+.dd-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dd-4);
+  padding: var(--dd-3) var(--dd-5);
+  border-bottom: 1px solid var(--dd-line);
+  background: var(--dd-ink);
+}
+.dd-head__id {
+  display: flex;
+  align-items: baseline;
+  gap: var(--dd-3);
+  min-width: 0;
+}
+.dd-mark {
+  font-family: var(--dd-display);
+  font-weight: 700;
+  font-size: var(--dd-t-md);
+  letter-spacing: -0.02em;
+  color: var(--dd-bone);
+  white-space: nowrap;
+}
+/* The timer is display type, tabular so digits don't jitter as they count. */
+.dd-clock {
+  font-family: var(--dd-display);
+  font-size: var(--dd-t-xl);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  color: var(--dd-bone);
+}
+.dd-clock[data-critical='true'] { color: var(--dd-signal); }
+.dd-clock__unit {
+  font-family: var(--dd-body);
+  font-size: var(--dd-t-xs);
+  color: var(--dd-sage);
+  margin-left: var(--dd-2);
+  letter-spacing: 0;
+}
+.dd-head__acts { display: flex; align-items: center; gap: var(--dd-2); }
+
+/* ---- buttons ----------------------------------------------------------- */
+.dd-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dd-2);
+  padding: 7px var(--dd-3);
+  border: 1px solid var(--dd-line-lit);
+  border-radius: var(--dd-radius);
+  background: transparent;
+  color: var(--dd-bone);
+  font-family: var(--dd-body);
+  font-size: var(--dd-t-sm);
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+.dd-btn:hover:not(:disabled) { background: var(--dd-raised); border-color: var(--dd-sage); }
+.dd-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.dd-btn--primary {
+  background: var(--dd-bone);
+  color: var(--dd-ink);
+  border-color: var(--dd-bone);
+  font-weight: 500;
+}
+.dd-btn--primary:hover:not(:disabled) { background: #fff; border-color: #fff; }
+.dd-btn--danger { border-color: var(--dd-signal-dim); color: var(--dd-signal); }
+.dd-btn--danger:hover:not(:disabled) { background: rgba(194, 96, 60, 0.1); border-color: var(--dd-signal); }
+.dd-btn--ghost { border-color: transparent; color: var(--dd-sage); }
+.dd-btn--ghost:hover:not(:disabled) { color: var(--dd-bone); background: var(--dd-raised); }
+.dd-btn--icon { padding: 7px; }
+
+/* Visible keyboard focus everywhere — quality floor, not decoration. */
+.dd-root :focus-visible {
+  outline: 2px solid var(--dd-signal);
+  outline-offset: 2px;
+}
+
+/* =========================== body split ================================= */
+.dd-body {
+  display: grid;
+  grid-template-columns: var(--dd-rail) 1fr;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ---- manifest (left rail) ---------------------------------------------- */
+.dd-manifest {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--dd-line);
+  background: var(--dd-ink);
+}
+.dd-manifest__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: var(--dd-4) var(--dd-4) var(--dd-2);
+  gap: var(--dd-2);
+}
+/* Section titles are display type at body size — no ALL-CAPS eyebrows. */
+.dd-title {
+  font-family: var(--dd-display);
+  font-size: var(--dd-t-md);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--dd-bone);
+}
+.dd-count {
+  font-size: var(--dd-t-xs);
+  color: var(--dd-sage);
+  font-variant-numeric: tabular-nums;
+}
+.dd-manifest__list { flex: 1; overflow-y: auto; min-height: 0; }
+
+/* Rows, not cards. Hairline separators encode structure. */
+.dd-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: var(--dd-3);
+  width: 100%;
+  padding: var(--dd-3) var(--dd-4);
+  border: 0;
+  border-bottom: 1px solid var(--dd-line);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 100ms ease;
+}
+.dd-row:hover { background: var(--dd-raised); }
+.dd-row[data-selected='true'] { background: var(--dd-raised); box-shadow: inset 2px 0 0 var(--dd-signal); }
+.dd-row__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dd-bone);
+}
+.dd-row__meta {
+  font-size: var(--dd-t-xs);
+  color: var(--dd-sage);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.dd-row__acts { display: flex; gap: var(--dd-1); opacity: 0; transition: opacity 100ms ease; }
+.dd-row:hover .dd-row__acts,
+.dd-row:focus-within .dd-row__acts { opacity: 1; }
+
+.dd-manifest__foot { padding: var(--dd-3) var(--dd-4); border-top: 1px solid var(--dd-line); }
+
+/* Empty state: honest and quiet. */
+.dd-empty {
+  padding: var(--dd-7) var(--dd-4);
+  text-align: center;
+  color: var(--dd-dim);
+  font-size: var(--dd-t-sm);
+}
+
+/* ---- exchange (chat) ---------------------------------------------------- */
+.dd-exchange {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  min-height: 0;
+  background: var(--dd-ink);
+}
+.dd-exchange__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--dd-4) var(--dd-5) var(--dd-2);
+  gap: var(--dd-3);
+}
+.dd-exchange__log {
+  overflow-y: auto;
+  min-height: 0;
+  padding: var(--dd-2) var(--dd-5) var(--dd-5);
+}
+
+/* No bubbles, no cards: the speaker is encoded in type weight + a rule. */
+.dd-turn { padding: var(--dd-4) 0; border-bottom: 1px solid var(--dd-line); max-width: 74ch; }
+.dd-turn:last-child { border-bottom: 0; }
+.dd-turn__who {
+  display: flex;
+  align-items: baseline;
+  gap: var(--dd-2);
+  margin-bottom: var(--dd-2);
+}
+.dd-turn__name {
+  font-family: var(--dd-display);
+  font-size: var(--dd-t-sm);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.dd-turn[data-role='user'] .dd-turn__name { color: var(--dd-sage); }
+.dd-turn[data-role='model'] .dd-turn__name { color: var(--dd-bone); }
+.dd-turn__time { font-size: var(--dd-t-xs); color: var(--dd-dim); font-variant-numeric: tabular-nums; }
+.dd-turn__body { font-size: var(--dd-t-md); line-height: 1.6; color: var(--dd-bone); }
+.dd-turn__body > :first-child { margin-top: 0; }
+.dd-turn__body > :last-child { margin-bottom: 0; }
+.dd-turn__body p { margin: 0 0 0.75em; }
+.dd-turn__body code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+  background: var(--dd-sunken);
+  border: 1px solid var(--dd-line);
+  border-radius: var(--dd-radius);
+  padding: 1px 5px;
+}
+.dd-turn__body pre {
+  background: var(--dd-sunken);
+  border: 1px solid var(--dd-line);
+  border-radius: var(--dd-radius);
+  padding: var(--dd-3);
+  overflow-x: auto;
+}
+.dd-turn__body pre code { background: none; border: 0; padding: 0; }
+.dd-turn__body ul, .dd-turn__body ol { margin: 0 0 0.75em; padding-left: 1.25em; }
+
+/* Actions the agent took: a ledger line, not badges. */
+.dd-ledger {
+  margin-top: var(--dd-3);
+  padding-top: var(--dd-2);
+  border-top: 1px dashed var(--dd-line);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--dd-1) var(--dd-3);
+  font-size: var(--dd-t-xs);
+  color: var(--dd-sage);
+}
+.dd-ledger__item { display: inline-flex; align-items: center; gap: 5px; font-variant-numeric: tabular-nums; }
+.dd-ledger__verb { color: var(--dd-bone); font-weight: 500; }
+.dd-ledger__verb[data-kind='deleted'] { color: var(--dd-signal); }
+.dd-ledger__verb[data-kind='created'] { color: var(--dd-go); }
+
+/* ---- composer ----------------------------------------------------------- */
+.dd-composer { padding: var(--dd-3) var(--dd-5) var(--dd-5); border-top: 1px solid var(--dd-line); }
+.dd-composer__box {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--dd-2);
+  padding: var(--dd-2) var(--dd-2) var(--dd-2) var(--dd-3);
+  background: var(--dd-sunken);
+  border: 1px solid var(--dd-line-lit);
+  border-radius: var(--dd-radius);
+  transition: border-color 120ms ease;
+}
+.dd-composer__box:focus-within { border-color: var(--dd-sage); }
+.dd-composer__input {
+  flex: 1;
+  min-height: 22px;
+  max-height: 180px;
+  border: 0;
+  background: transparent;
+  color: var(--dd-bone);
+  font-family: var(--dd-body);
+  font-size: var(--dd-t-md);
+  line-height: 1.5;
+  resize: none;
+  outline: none;
+}
+.dd-composer__input::placeholder { color: var(--dd-dim); }
+.dd-composer__hint {
+  margin-top: var(--dd-2);
+  font-size: var(--dd-t-xs);
+  color: var(--dd-dim);
+  display: flex;
+  justify-content: space-between;
+  gap: var(--dd-3);
+}
+kbd {
+  font-family: var(--dd-body);
+  font-size: 0.95em;
+  border: 1px solid var(--dd-line-lit);
+  border-bottom-width: 2px;
+  border-radius: var(--dd-radius);
+  padding: 0 4px;
+  color: var(--dd-sage);
+}
+
+/* Working indicator: three dots, no spinner. */
+.dd-working { display: inline-flex; gap: 4px; align-items: center; }
+.dd-working span {
+  width: 4px; height: 4px; border-radius: 50%;
+  background: var(--dd-sage);
+  animation: dd-blink 1.2s ease-in-out infinite;
+}
+.dd-working span:nth-child(2) { animation-delay: 0.15s; }
+.dd-working span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes dd-blink { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
+
+/* ---- dropzone ----------------------------------------------------------- */
+.dd-drop {
+  border: 1px dashed var(--dd-line-lit);
+  border-radius: var(--dd-radius);
+  padding: var(--dd-4);
+  text-align: center;
+  color: var(--dd-sage);
+  font-size: var(--dd-t-sm);
+  cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+.dd-drop:hover, .dd-drop[data-active='true'] {
+  border-color: var(--dd-sage);
+  background: var(--dd-raised);
+  color: var(--dd-bone);
+}
+
+/* ---- uploads in flight --------------------------------------------------- */
+.dd-up { padding: var(--dd-2) 0; border-bottom: 1px solid var(--dd-line); }
+.dd-up__top { display: flex; justify-content: space-between; gap: var(--dd-2); font-size: var(--dd-t-xs); }
+.dd-up__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dd-bone); }
+.dd-up__track { height: 1px; background: var(--dd-line); margin-top: 6px; }
+.dd-up__fill { height: 100%; background: var(--dd-sage); transition: width 200ms ease; }
+.dd-up__fill[data-state='error'] { background: var(--dd-signal); }
+.dd-up__fill[data-state='success'] { background: var(--dd-go); }
+
+/* =========================== gate (login) ================================ */
+.dd-gate {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  background: var(--dd-ink);
+  color: var(--dd-bone);
+  font-family: var(--dd-body);
+}
+.dd-gate__center { display: grid; place-items: center; padding: var(--dd-5); }
+.dd-gate__form { width: 100%; max-width: 380px; }
+/* The headline is display type doing actual work, not a neutral label. */
+.dd-gate__title {
+  font-family: var(--dd-display);
+  font-size: clamp(2rem, 7vw, 3.25rem);
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  line-height: 0.95;
+  margin: 0 0 var(--dd-3);
+}
+.dd-gate__sub { color: var(--dd-sage); font-size: var(--dd-t-md); margin: 0 0 var(--dd-6); max-width: 46ch; }
+.dd-field { display: flex; flex-direction: column; gap: var(--dd-2); }
+.dd-label { font-size: var(--dd-t-sm); color: var(--dd-sage); }
+.dd-input {
+  width: 100%;
+  padding: var(--dd-3);
+  background: var(--dd-sunken);
+  border: 1px solid var(--dd-line-lit);
+  border-radius: var(--dd-radius);
+  color: var(--dd-bone);
+  font-family: var(--dd-body);
+  font-size: var(--dd-t-md);
+  outline: none;
+  transition: border-color 120ms ease;
+}
+.dd-input:focus { border-color: var(--dd-sage); }
+.dd-alert {
+  margin-top: var(--dd-3);
+  padding: var(--dd-2) var(--dd-3);
+  border-left: 2px solid var(--dd-signal);
+  background: rgba(194, 96, 60, 0.08);
+  color: var(--dd-bone);
+  font-size: var(--dd-t-sm);
+}
+
+/* =========================== responsive ================================== */
+@media (max-width: 860px) {
+  .dd-body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .dd-manifest {
+    border-right: 0;
+    border-bottom: 1px solid var(--dd-line);
+    max-height: 38vh;
+  }
+  .dd-head { flex-wrap: wrap; gap: var(--dd-2); padding: var(--dd-3) var(--dd-4); }
+  .dd-clock { font-size: 1.5rem; }
+  .dd-exchange__log, .dd-composer { padding-left: var(--dd-4); padding-right: var(--dd-4); }
+}
