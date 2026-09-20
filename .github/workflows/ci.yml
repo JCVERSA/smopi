@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+# Cancel superseded runs on the same ref to save runner minutes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Type check, build & test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # `npm ci` is not usable: the repo commits bun.lock, not package-lock.json.
+      # --legacy-peer-deps matches the documented install path in README.md.
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: Type check
+        run: npm run lint
+
+      # `npm test` runs `npm run build` via pretest, so the built bundle the
+      # tests exercise is always current.
+      - name: Test
+        run: npm test
+
+      # `npm audit` needs an npm lockfile; the repo commits bun.lock only, so
+      # generate a throwaway one (not committed) purely for the audit.
+      - name: Audit production dependencies
+        run: |
+          npm install --package-lock-only --legacy-peer-deps --no-audit --no-fund
+          npm audit --omit=dev
